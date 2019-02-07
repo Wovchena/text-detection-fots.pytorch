@@ -1,4 +1,6 @@
 # [FOTS](https://arxiv.org/abs/1801.01671) based text detection ([PyTorch](https://pytorch.org/))
+## Running:
+Replace datasets.ICDAR2015 folder in `train.py`. It is expected that the provided folder contains unzipped `ch4_training_images` and `ch4_training_localization_transcription_gt` from [Task 4.4: End to End (2015 edition)](http://rrc.cvc.uab.es/?ch=4&com=downloads). Run `train.py`.
 ## DataSets
 * Synth800k (train only)
 * ICDAR 2015
