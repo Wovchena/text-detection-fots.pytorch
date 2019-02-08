@@ -52,7 +52,8 @@ def transform(im, quads, texts, file_name, icdar):
     # crop
     goodPoint = None
     for _ in range(50):  # TODO we almost never get crops with texts with such approach
-        point = (torch.randint(low=0, high=nW - 640, size=(1,)).item(), torch.randint(low=0, high=nH - 640, size=(1,)).item())  # (x, y)
+        point = (int(torch.randint(low=0, high=nW - 640, size=(1,)).item()),
+                 int(torch.randint(low=0, high=nH - 640, size=(1,)).item()))  # (x, y)
         intersect = False
         for bbox in quads:
             mins = np.amin(bbox, axis=0, out=None, keepdims=False)
@@ -100,33 +101,37 @@ def transform(im, quads, texts, file_name, icdar):
         # return cropped, classification, regression, thetas, training_mask, file_name
     else:
         print('could not find')
-        return icdar[torch.randint(low=0, high=len(icdar), size=(1,)).item()]
+        return icdar[int(torch.randint(low=0, high=len(icdar), size=(1,)).item())]
 
 
 class ICDAR2015(torch.utils.data.Dataset):
     def __init__(self, root, train, transform):
-        self.data = []
         self.transform = transform
-        pattern = re.compile('^' + '(\\d+),' * 8 + '(.+)$')
+        self.root = root
+        self.img_dir = 'ch4_training_images'
+        self.labels_dir = 'ch4_training_localization_transcription_gt'
+        self.image_prefix = []
+        self.pattern = re.compile('^' + '(\\d+),' * 8 + '(.+)$')
         if train: # TODO else
             for dirEntry in os.scandir(os.path.join(root, 'ch4_training_images')):
-                with open(os.path.join(os.path.join(root, 'ch4_training_localization_transcription_gt'), 'gt_' + dirEntry.name[:-3] + 'txt'), encoding='utf-8-sig') as f:
-                    quads = []
-                    texts = []
-                    for line in f:
-                        matches = pattern.findall(line)[0]
-                        numbers = np.array(matches[:8], dtype=float)
-                        quads.append(numbers.reshape((4, 2)))
-                        texts.append('###' == matches[8])
-                    img = cv2.imread(dirEntry.path).astype(float)
-                self.data.append((img, np.stack(quads), texts, dirEntry.name))
-                break
+                self.image_prefix.append(dirEntry.name[:-4])
 
     def __len__(self):
-        return len(self.data)
+        return len(self.image_prefix)
 
     def __getitem__(self, idx):
-        return transform(*self.data[idx], self)
+        img = cv2.imread(os.path.join(os.path.join(self.root, self.img_dir), self.image_prefix[idx] + '.jpg'), cv2.IMREAD_COLOR).astype(np.float32)
+        quads = []
+        texts = []
+        lines = [line.rstrip('\n') for line in open(os.path.join(os.path.join(self.root, self.labels_dir), 'gt_' + self.image_prefix[idx] + '.txt'),
+                                                    encoding='utf-8-sig')]
+        for line in lines:
+            matches = self.pattern.findall(line)[0]
+            numbers = np.array(matches[:8], dtype=float)
+            quads.append(numbers.reshape((4, 2)))
+            texts.append('###' == matches[8])
+
+        return transform(img, np.stack(quads), texts, self.image_prefix[idx], self)
 
 
 if '__main__' == __name__:

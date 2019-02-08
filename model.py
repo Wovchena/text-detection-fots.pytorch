@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.init as init
-import pretrainedmodels as pm
+import torchvision
 
 
 def mean_image_subtraction(images, means=[123.68, 116.78, 103.94]):
@@ -61,7 +61,7 @@ class FOTSModel(nn.Module):
     def __init__(self):
         super(FOTSModel, self).__init__()
 
-        self.backbone = pm.__dict__['resnet50'](pretrained='imagenet')  # resnet50 is in paper
+        self.backbone = torchvision.models.resnet50(pretrained=True)
 
         self.mergeLayers0 = DummyLayer()
 
@@ -76,17 +76,6 @@ class FOTSModel(nn.Module):
         self.scoreMap = nn.Conv2d(32, 1, kernel_size=1)
         self.geoMap = nn.Conv2d(32, 4, kernel_size=1)
         self.angleMap = nn.Conv2d(32, 1, kernel_size=1)
-
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                m.weight.data.normal_().fmod_(2).mul_(0.01).add_(0)
-                # init.xavier_uniform_(m.weight.data)
-            elif isinstance(m, nn.BatchNorm2d):
-                m.weight.data.fill_(1)
-                m.bias.data.zero_()
-            elif isinstance(m, nn.Linear):
-                init.xavier_uniform_(m.weight.data)
-                m.bias.data.zero_()
 
     def foward_backbone(self, input):
         conv2 = None

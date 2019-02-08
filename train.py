@@ -1,3 +1,5 @@
+import argparse
+
 import datasets
 from model import FOTSModel
 import torch
@@ -10,8 +12,7 @@ import tqdm
 
 def restore_checkpoint(folder):
     model = FOTSModel().to(torch.device("cuda"))
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001, betas=(0.9, 0.999), eps=1e-08, weight_decay=1e-5,
-                                 amsgrad=False)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.0001, weight_decay=1e-5)
     lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, 0.94)
 
     if os.path.isfile(os.path.join(folder, 'last_checkpoint.pt')):
@@ -127,10 +128,12 @@ def fit(start_epoch, model, loss_func, opt, lr_scheduler, best_score, checkpoint
 
 
 if __name__ == '__main__':
-    icdar = datasets.ICDAR2015(r'C:\Users\vzlobin\Documents\repo\FOTS.PyTorch\data\icdar\icdar2015\4.4\training', True,
-                               datasets.transform)
-    dl = torch.utils.data.DataLoader(icdar, batch_size=1, shuffle=False, sampler=None, batch_sampler=None,
-                                     num_workers=4, pin_memory=False, drop_last=False, timeout=0, worker_init_fn=None)
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--train-folder', type=str, required=True, help='Path to folder with train images and labels')
+    args = parser.parse_args()
+
+    icdar = datasets.ICDAR2015(args.train_folder, True, datasets.transform)
+    dl = torch.utils.data.DataLoader(icdar, batch_size=8, shuffle=True, sampler=None, batch_sampler=None, num_workers=8)
     checkoint_dir = 'runs'
     epoch, model, optimizer, lr_scheduler, best_score = restore_checkpoint(checkoint_dir)
     fit(epoch, model, detection_loss, optimizer, lr_scheduler, best_score, checkoint_dir, dl, None)
