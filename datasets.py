@@ -1,10 +1,9 @@
+import torch
 import torch.utils.data
 import os
 import cv2
 import numpy as np
 import re
-import random
-import torch
 
 
 def point_dist_to_line(p1, p2, p3):
@@ -28,7 +27,8 @@ def transform(im, quads, texts, file_name, icdar):
     # grab the rotation matrix (applying the negative of the
     # angle to rotate clockwise), then grab the sine and cosine
     # (i.e., the rotation components of the matrix)
-    M = cv2.getRotationMatrix2D((cX, cY), angle=random.uniform(-10, 10), scale=1.0)
+    angle = torch.empty(1).uniform_(-10, 10).item()
+    M = cv2.getRotationMatrix2D((cX, cY), angle=angle, scale=1.0)
     cos = np.abs(M[0, 0])
     sin = np.abs(M[0, 1])
 
@@ -44,15 +44,15 @@ def transform(im, quads, texts, file_name, icdar):
     rotated = cv2.warpAffine(upscaled, M, (nW, nH))
     quads = cv2.transform(quads, M)
     # stretch
-    strechK = random.uniform(0.5, 2)
-    stretched = cv2.resize(rotated, None, fx=1, fy=strechK)
+    strechK = torch.empty(1).uniform_(0.8, 1.2).item()
+    stretched = cv2.resize(rotated, None, fx=1, fy=strechK, interpolation=cv2.INTER_CUBIC)
     quads[:, :, 1] = quads[:, :, 1] * strechK
     nH *= strechK
     nH = int(nH)
     # crop
     goodPoint = None
     for _ in range(50):  # TODO we almost never get crops with texts with such approach
-        point = (random.randrange(0, nW - 640), random.randrange(0, nH - 640))  # (x, y)
+        point = (torch.randint(low=0, high=nW - 640, size=(1,)).item(), torch.randint(low=0, high=nH - 640, size=(1,)).item())  # (x, y)
         intersect = False
         for bbox in quads:
             mins = np.amin(bbox, axis=0, out=None, keepdims=False)
@@ -72,8 +72,9 @@ def transform(im, quads, texts, file_name, icdar):
         rboxes = []
         for quad in quads:
             rboxes.append(cv2.minAreaRect(quad))
-        cv2.polylines(cropped, quads, True, (0, 255, 255))
-        classification = np.zeros(((cropped.shape[0] + 2) // 4, (cropped.shape[1] + 2) // 4), dtype=cropped.dtype)
+        # cropped = cv2.resize(cropped, None, fx=0.25, fy=0.25)
+        # cv2.polylines(cropped, quads, True, (0, 255, 255))
+        classification = np.zeros((160, 160), dtype=cropped.dtype)
         training_mask = np.ones(classification.shape, dtype=cropped.dtype)  # TODO take NOT CARE texts into account
         regression = np.zeros((4,) + classification.shape, dtype=float)
         tmp_regression = np.empty(classification.shape, dtype=cropped.dtype)
@@ -90,17 +91,16 @@ def transform(im, quads, texts, file_name, icdar):
             points = np.nonzero(tmp_regression)
             pointsT = np.transpose(points)
             for point in pointsT:
-                for plane in range(4):
-                    if plane != 3:  # TODO looks that it is really slow
-                        regression[(plane, ), tuple(point)] = point_dist_to_line(poly[plane], poly[plane + 1], point)
-                    else:
-                        regression[(plane, ) + tuple(point)] = point_dist_to_line(poly[plane], poly[0], point)
+                for plane in range(3):  # TODO looks that it is really slow
+                    regression[(plane, ), tuple(point)] = point_dist_to_line(poly[plane], poly[plane + 1], point)
+                regression[(plane, ) + tuple(point)] = point_dist_to_line(poly[plane], poly[0], point)
             thetas[points] = rbox[2]
         permuted = np.transpose(cropped, (2, 1, 0))  # TODO check if I should swap w and h
         return torch.from_numpy(permuted).float(), torch.from_numpy(classification).float(),  torch.from_numpy(regression).float(), torch.from_numpy(thetas).float(), torch.from_numpy(training_mask).float(), file_name
+        # return cropped, classification, regression, thetas, training_mask, file_name
     else:
         print('could not find')
-        return icdar[random.randrange(0, len(icdar))]
+        return icdar[torch.randint(low=0, high=len(icdar), size=(1,)).item()]
 
 
 class ICDAR2015(torch.utils.data.Dataset):
@@ -115,11 +115,12 @@ class ICDAR2015(torch.utils.data.Dataset):
                     texts = []
                     for line in f:
                         matches = pattern.findall(line)[0]
-                        numbers = np.array(matches[:8], dtype=int)
+                        numbers = np.array(matches[:8], dtype=float)
                         quads.append(numbers.reshape((4, 2)))
-                        texts.append(matches[8])
-                    img = cv2.imread(dirEntry.path)
+                        texts.append('###' == matches[8])
+                    img = cv2.imread(dirEntry.path).astype(float)
                 self.data.append((img, np.stack(quads), texts, dirEntry.name))
+                break
 
     def __len__(self):
         return len(self.data)
@@ -131,14 +132,16 @@ class ICDAR2015(torch.utils.data.Dataset):
 if '__main__' == __name__:
     import torch
     icdar = ICDAR2015('C:\\Users\\vzlobin\\Documents\\repo\\FOTS.PyTorch\\data\\icdar\\icdar2015\\4.4\\training', True, transform)
-    dl = torch.utils.data.DataLoader(icdar, batch_size=2, shuffle=False, sampler=None, batch_sampler=None, num_workers=1, pin_memory = False, drop_last = False, timeout = 0, worker_init_fn = None)
-    for cropped, classification, regression, thetas, training_mask, file_names in dl:
-        print(file_names)
-    # classif, regression, thetas, training_mask, crop = icdar[0]
-    # cv2.imshow('', crop)
-    # cv2.waitKey(0)
-    # cv2.imshow('', classif * 255)
-    # cv2.waitKey(0)
+    # dl = torch.utils.data.DataLoader(icdar, batch_size=2, shuffle=False, sampler=None, batch_sampler=None, num_workers=1, pin_memory = False, drop_last = False, timeout = 0, worker_init_fn = None)
+    # for cropped, classification, regression, thetas, training_mask, file_names in dl:
+    #     print(file_names)
+    crop, classif, regression, thetas, training_mask, file_name = icdar[0]
+    cv2.imshow('', crop / 255)
+    cv2.waitKey(0)
+    # print(crop.shape)
+    # print(classif.shape)
+    cv2.imshow('', training_mask * 255)
+    cv2.waitKey(0)
     # m = np.amax(regression)
     # for i in range(4):
     #     cv2.imshow('', np.array(np.around(regression[:, :, i] * 255 / m), dtype=np.uint8))
