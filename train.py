@@ -44,54 +44,33 @@ def save_checkpoint(epoch, model, optimizer, lr_scheduler, best_score, folder, s
 
 
 def detection_loss(pred, gt):
-    y_true_cls, y_true_geo, theta_gt, training_mask, file_names = gt
-    y_true_cls, y_true_geo, theta_gt, training_mask = y_true_cls.to('cuda'), y_true_geo.to('cuda'), theta_gt.to('cuda'), training_mask.to('cuda')
     y_pred_cls, y_pred_geo, theta_pred = pred
+    y_true_cls, y_true_geo, theta_gt, training_mask, file_names = gt
+    y_true_cls, theta_gt = y_true_cls.unsqueeze(1), theta_gt.unsqueeze(1)
+    y_true_cls, y_true_geo, theta_gt, training_mask = y_true_cls.to('cuda'), y_true_geo.to('cuda'), theta_gt.to('cuda'), training_mask.to('cuda')
 
-    classification_loss = __dice_coefficient(y_true_cls, y_pred_cls, training_mask)
-    # scale classification loss to match the iou loss part
-    classification_loss *= 0.01
+    OHEM_mask = torch.ones_like(y_true_cls)  # TODO OHEM
+    mask = OHEM_mask * training_mask
+    mask = mask.unsqueeze(1)
+    samples_count = len(mask.nonzero())
+
+    cls_loss = torch.nn.functional.binary_cross_entropy(input=y_pred_cls, target=y_true_cls, weight=None, reduction='none')
+    cls_loss = cls_loss * mask
+    cls_loss = cls_loss.sum() / samples_count  # TODO should I divide by samples_count or len(det_mask.nonzero())?
 
     d1_gt, d2_gt, d3_gt, d4_gt = torch.split(y_true_geo, 1, 1)
     d1_pred, d2_pred, d3_pred, d4_pred = torch.split(y_pred_geo, 1, 1)
     area_gt = (d1_gt + d3_gt) * (d2_gt + d4_gt)
     area_pred = (d1_pred + d3_pred) * (d2_pred + d4_pred)
-    w_union = torch.min(d2_gt, d2_pred) + torch.min(d4_gt, d4_pred)
-    h_union = torch.min(d1_gt, d1_pred) + torch.min(d3_gt, d3_pred)
-    area_intersect = w_union * h_union
+    w_intersect = torch.min(d2_gt, d2_pred) + torch.min(d4_gt, d4_pred)  # w or h, who cares
+    h_intersect = torch.min(d1_gt, d1_pred) + torch.min(d3_gt, d3_pred)
+    area_intersect = w_intersect * h_intersect
     area_union = area_gt + area_pred - area_intersect
-    L_AABB = -torch.log((area_intersect + 1.0) / (area_union + 1.0))
-    L_theta = 1 - torch.cos(theta_pred - theta_gt)
-    L_g = L_AABB + 20 * L_theta
-
-    return torch.mean(L_g * y_true_cls * training_mask) + classification_loss
-
-def __dice_coefficient(y_true_cls, y_pred_cls,
-                     training_mask):
-    '''
-    dice loss
-    :param y_true_cls:s
-    :param y_pred_cls:
-    :param training_mask:
-    :return:
-    '''
-    eps = 1e-5
-    intersection = torch.sum(y_true_cls * y_pred_cls * training_mask)
-    union = torch.sum(y_true_cls * training_mask) + torch.sum(y_pred_cls * training_mask) + eps
-    loss = 1. - (2 * intersection / union)
-
-    return loss
-
-
-def loss_batch(model, loss_func, xb, yb, opt=None):
-    loss = loss_func(model(xb.to('cuda')), yb)
-
-    if opt is not None:
-        loss.backward()
-        opt.step()
-        opt.zero_grad()
-
-    return loss.item(), len(xb)
+    tensor_loss = area_intersect / area_union + 10 * (1 - torch.cos(theta_pred - theta_gt))
+    det_mask = y_true_cls * mask
+    tensor_loss = tensor_loss * det_mask
+    reg_loss = tensor_loss.sum() / len(det_mask.nonzero())
+    return cls_loss + reg_loss
 
 
 def fit(start_epoch, model, loss_func, opt, lr_scheduler, best_score, max_batches_per_iter_cnt, checkpoint_dir, train_dl, valid_dl):
