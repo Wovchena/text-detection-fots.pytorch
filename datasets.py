@@ -4,6 +4,7 @@ import os
 import cv2
 import numpy as np
 import re
+import math
 
 
 def point_dist_to_line(p1, p2, p3):
@@ -50,58 +51,75 @@ def transform(im, quads, texts, file_name, icdar):
     nH *= strechK
     nH = int(nH)
     # crop
-    goodPoint = None
-    for _ in range(50):  # TODO we almost never get crops with texts with such approach
-        point = (int(torch.randint(low=0, high=nW - 640, size=(1,)).item()),
-                 int(torch.randint(low=0, high=nH - 640, size=(1,)).item()))  # (x, y)
-        intersect = False
-        for bbox in quads:
-            mins = np.amin(bbox, axis=0, out=None, keepdims=False)
-            maxes = np.amax(bbox, axis=0, out=None, keepdims=False)
-            if mins[0] < point[0] < maxes[0] or mins[1] < point[1] < maxes[1] or mins[0] < point[0] + 640 < maxes[0] or mins[1] < point[1] + 640 < maxes[1]:
-                intersect = True
+    quads /= 4
+    smaller_bounds = []
+    bigger_bounds = []
+    for quad in quads:
+        smaller_bound = np.amin(quad, axis=0, out=None, keepdims=False)
+        smaller_bounds.append(smaller_bound)
+        bigger_bound = np.amax(quad, axis=0, out=None, keepdims=False)
+        bigger_bounds.append(bigger_bound)
+    the_smallest_bound_x, the_smallest_bound_y = np.amin(smaller_bounds, axis=0)
+    the_biggest_bound_x, the_biggest_bound_y = np.amax(smaller_bounds, axis=0)
+    the_smallest_crop_point_x = max(int(the_smallest_bound_x) - 160, 0)
+    the_smallest_crop_point_y = max(int(the_smallest_bound_y) - 160, 0)
+    the_biggest_crop_point_x = min(math.ceil(the_biggest_bound_x), stretched.shape[1] // 4 - 160)
+    the_biggest_crop_point_y = min(math.ceil(the_biggest_bound_y), stretched.shape[0] // 4 - 160)
+    if the_smallest_crop_point_x >= the_biggest_crop_point_x or the_smallest_crop_point_y >= the_biggest_crop_point_y:  # torch.randint requires this
+        print('cant crop ', file_name)
+        return icdar[torch.randint(low=0, high=len(icdar), size=(1,), dtype=torch.int16).item()]
+    good_crop_point = None
+    for _ in range(50):  # TODO it can be better to find intersections with rboxes or quads
+        crop_point = (torch.randint(low=the_smallest_crop_point_x, high=the_biggest_crop_point_x, size=(1,), dtype=torch.int16).item(),
+                      torch.randint(low=the_smallest_crop_point_y, high=the_biggest_crop_point_y, size=(1,), dtype=torch.int16).item())
+        covered_at_least_one_quad = False
+        for quad_i in range(len(quads)):
+            if smaller_bounds[quad_i][0] >= crop_point[0] and smaller_bounds[quad_i][1] >= crop_point[1] \
+                    and bigger_bounds[quad_i][0] <= crop_point[0] + 160 and bigger_bounds[quad_i][1] <= crop_point[1] + 160:
+                covered_at_least_one_quad = True
                 break
-        if not intersect:
-            goodPoint = point
+        if covered_at_least_one_quad:
+            good_crop_point = crop_point
             break
-    if goodPoint:
-        # stretched = im
-        # goodPoint = (0, 0)
-        cropped = stretched[goodPoint[1]:goodPoint[1] + 640, goodPoint[0]:goodPoint[0] + 640]
-        quads -= np.array(goodPoint)
-        quads = np.int0(quads / 4)
-        rboxes = []
-        for quad in quads:
-            rboxes.append(cv2.minAreaRect(quad))
-        # cropped = cv2.resize(cropped, None, fx=0.25, fy=0.25)
-        # cv2.polylines(cropped, quads, True, (0, 255, 255))
-        classification = np.zeros((160, 160), dtype=cropped.dtype)
-        training_mask = np.ones(classification.shape, dtype=cropped.dtype)  # TODO take NOT CARE texts into account
+    if good_crop_point:
+        cropped = stretched[good_crop_point[1] * 4:good_crop_point[1] * 4 + 640, good_crop_point[0] * 4:good_crop_point[0] * 4 + 640]
+        quads -= np.array(good_crop_point)
+        int_quads = np.rint(quads).astype(int)
+        minAreaRects = [cv2.minAreaRect(int_quad) for int_quad in int_quads]
+        # cropped = cv2.resize(cropped, None, fx=0.25, fy=0.25)  # TODO comment!!!
+        # cv2.polylines(cropped, int_quads, True, (0, 255, 255))   # TODO comment!!!
+        training_mask = np.ones((160, 160), dtype=float)  # TODO take NOT CARE texts into account
+        classification = np.zeros((160, 160), dtype=float)
         regression = np.zeros((4,) + classification.shape, dtype=float)
-        tmp_regression = np.empty(classification.shape, dtype=cropped.dtype)
+        tmp_regression = np.empty(classification.shape, dtype=float)
         thetas = np.zeros(classification.shape, dtype=float)
-        for rbox in rboxes:
-            tmp_regression.fill(0)
-            poly = cv2.boxPoints(rbox)
+        for quad_i in range(len(minAreaRects)):
+            minAreaRect = minAreaRects[quad_i]
+            shrunk_minAreaRect = minAreaRect[0], (minAreaRect[1][0] * 0.4, minAreaRect[1][1] * 0.4), minAreaRect[2]
+            poly = cv2.boxPoints(minAreaRect)
             int_poly = np.int0(poly)
-            cv2.fillConvexPoly(classification, int_poly, 1)
-            cv2.fillConvexPoly(training_mask, int_poly, 0)
-            shrunk_rbox = rbox[0], (rbox[1][0] * 0.4, rbox[1][1] * 0.4), rbox[2]
-            cv2.fillConvexPoly(training_mask, np.int0(cv2.boxPoints(shrunk_rbox)), 1) # TODO use shrunk poly
-            cv2.fillConvexPoly(tmp_regression, int_poly, 1)
-            points = np.nonzero(tmp_regression)
-            pointsT = np.transpose(points)
-            for point in pointsT:
-                for plane in range(3):  # TODO looks that it is really slow
-                    regression[(plane, ), tuple(point)] = point_dist_to_line(poly[plane], poly[plane + 1], point)
-                regression[(plane, ) + tuple(point)] = point_dist_to_line(poly[plane], poly[0], point)
-            thetas[points] = rbox[2]
-        permuted = np.transpose(cropped, (2, 1, 0))  # TODO check if I should swap w and h
+            if smaller_bounds[quad_i][0] >= good_crop_point[0] and smaller_bounds[quad_i][1] >= good_crop_point[1] \
+                    and bigger_bounds[quad_i][0] <= good_crop_point[0] + 160 and bigger_bounds[quad_i][1] <= good_crop_point[1] + 160:
+                tmp_regression.fill(0)
+                cv2.fillConvexPoly(classification, int_poly, 1)
+                cv2.fillConvexPoly(training_mask, int_poly, 0)
+                cv2.fillConvexPoly(training_mask, np.int0(cv2.boxPoints(shrunk_minAreaRect)), 1)
+                cv2.fillConvexPoly(tmp_regression, int_poly, 1)
+                points = np.nonzero(tmp_regression)
+                pointsT = np.transpose(points)
+                for point in pointsT:
+                    for plane in range(3):  # TODO looks that it is really slow
+                        regression[(plane,) + tuple(point)] = point_dist_to_line(int_poly[plane], int_poly[plane + 1], np.array((point[1], point[0])))
+                        regression[(3,) + tuple(point)] = point_dist_to_line(int_poly[3], int_poly[0], np.array((point[1], point[0])))
+                thetas[points] = minAreaRect[2]
+            else:
+                cv2.fillConvexPoly(training_mask, int_poly, 0)
+        permuted = np.transpose(cropped, (2, 0, 1))
         return torch.from_numpy(permuted).float(), torch.from_numpy(classification).float(),  torch.from_numpy(regression).float(), torch.from_numpy(thetas).float(), torch.from_numpy(training_mask).float(), file_name
         # return cropped, classification, regression, thetas, training_mask, file_name
     else:
-        print('could not find')
-        return icdar[int(torch.randint(low=0, high=len(icdar), size=(1,)).item())]
+        print('could not find good crop', file_name)
+        return icdar[torch.randint(low=0, high=len(icdar), size=(1,), dtype=torch.int16).item()]
 
 
 class ICDAR2015(torch.utils.data.Dataset):
@@ -140,23 +158,20 @@ if '__main__' == __name__:
     # dl = torch.utils.data.DataLoader(icdar, batch_size=2, shuffle=False, sampler=None, batch_sampler=None, num_workers=1, pin_memory = False, drop_last = False, timeout = 0, worker_init_fn = None)
     # for cropped, classification, regression, thetas, training_mask, file_names in dl:
     #     print(file_names)
-    crop, classif, regression, thetas, training_mask, file_name = icdar[0]
-    cv2.imshow('', crop / 255)
-    cv2.waitKey(0)
-    # print(crop.shape)
-    # print(classif.shape)
-    cv2.imshow('', training_mask * 255)
-    cv2.waitKey(0)
-    # m = np.amax(regression)
-    # for i in range(4):
-    #     cv2.imshow('', np.array(np.around(regression[:, :, i] * 255 / m), dtype=np.uint8))
-    #     cv2.waitKey(0)
-    # minim = np.amin(thetas)
-    # print(minim)
-    # thetas = thetas - minim
-    # m = np.amax(thetas)
-    # print(m)
-    # print(thetas)
-    #
-    # cv2.imshow('', np.array(np.around(thetas * 255 / m), dtype=np.uint8))
-    # cv2.waitKey(0)
+    for image_i in range(len(icdar)):
+        crop, classif, regression, thetas, training_mask, file_name = icdar[image_i]
+        # cv2.imshow('', crop / 255)
+        # cv2.waitKey(0)
+        # cv2.imshow('', training_mask * 255)
+        # cv2.waitKey(0)
+        # cv2.imshow('', classif * 255)
+        # cv2.waitKey(0)
+        # for i in range(4):
+        #     m = np.amax(regression[i])
+        #     cv2.imshow('', regression[i, :, :] / m)
+        #     cv2.waitKey(0)
+        # minim = np.amin(thetas)
+        # thetas = thetas - minim
+        # m = np.amax(thetas)
+        # cv2.imshow('', np.array(np.around(thetas * 255 / m), dtype=np.uint8))
+        # cv2.waitKey(0)
