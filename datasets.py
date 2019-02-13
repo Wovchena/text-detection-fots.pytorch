@@ -69,7 +69,7 @@ def transform(im, quads, texts, file_name, icdar):
         print('cant crop ', file_name)
         return icdar[torch.randint(low=0, high=len(icdar), size=(1,), dtype=torch.int16).item()]
     good_crop_point = None
-    for _ in range(50):  # TODO it can be better to find intersections with rboxes or quads
+    for _ in range(100):  # TODO it can be better to find intersections with rboxes or quads and remove if str(dirEntry.name) != 'img_636.jpg' and str(dirEntry.name) != 'img_624.jpg'
         crop_point = (torch.randint(low=the_smallest_crop_point_x, high=the_biggest_crop_point_x, size=(1,), dtype=torch.int16).item(),
                       torch.randint(low=the_smallest_crop_point_y, high=the_biggest_crop_point_y, size=(1,), dtype=torch.int16).item())
         covered_at_least_one_quad = False
@@ -132,7 +132,8 @@ class ICDAR2015(torch.utils.data.Dataset):
         self.pattern = re.compile('^' + '(\\d+),' * 8 + '(.+)$')
         if train: # TODO else
             for dirEntry in os.scandir(os.path.join(root, 'ch4_training_images')):
-                self.image_prefix.append(dirEntry.name[:-4])
+                if str(dirEntry.name) != 'img_636.jpg' and str(dirEntry.name) != 'img_624.jpg':
+                    self.image_prefix.append(dirEntry.name[:-4])
 
     def __len__(self):
         return len(self.image_prefix)

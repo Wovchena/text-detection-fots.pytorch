@@ -12,8 +12,8 @@ import tqdm
 
 def restore_checkpoint(folder):
     model = FOTSModel().to(torch.device("cuda"))
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.0001, weight_decay=1e-5)
-    lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=1, verbose=True, threshold=0.0001, threshold_mode='rel', cooldown=1, min_lr=0, eps=1e-08)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.005, weight_decay=1e-5)
+    lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=20, verbose=True, threshold=0.0001, threshold_mode='rel', cooldown=0, min_lr=0, eps=1e-08)
 
     if os.path.isfile(os.path.join(folder, 'last_checkpoint.pt')):
         checkpoint = torch.load(os.path.join(folder, 'last_checkpoint.pt'))
@@ -25,7 +25,7 @@ def restore_checkpoint(folder):
         best_score = checkpoint['best_score']
         return epoch, model, optimizer, lr_scheduler, best_score
     else:
-        return 0, model, optimizer, lr_scheduler, -math.inf
+        return 0, model, optimizer, lr_scheduler, +math.inf
 
 
 def save_checkpoint(epoch, model, optimizer, lr_scheduler, best_score, folder, save_as_best):
