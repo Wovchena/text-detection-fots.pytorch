@@ -68,7 +68,7 @@ def transform(im, quads, texts, file_name, icdar):
     if the_smallest_crop_point_x >= the_biggest_crop_point_x or the_smallest_crop_point_y >= the_biggest_crop_point_y:  # torch.randint requires this
         print('cant crop ', file_name)
         return icdar[torch.randint(low=0, high=len(icdar), size=(1,), dtype=torch.int16).item()]
-    good_crop_point = None
+    good_crop_point = None  # (150, 0)
     for _ in range(100):  # TODO it can be better to find intersections with rboxes or quads and remove if str(dirEntry.name) != 'img_636.jpg' and str(dirEntry.name) != 'img_624.jpg'
         crop_point = (torch.randint(low=the_smallest_crop_point_x, high=the_biggest_crop_point_x, size=(1,), dtype=torch.int16).item(),
                       torch.randint(low=the_smallest_crop_point_y, high=the_biggest_crop_point_y, size=(1,), dtype=torch.int16).item())
@@ -115,7 +115,7 @@ def transform(im, quads, texts, file_name, icdar):
             else:
                 cv2.fillConvexPoly(training_mask, int_poly, 0)
         permuted = np.transpose(cropped, (2, 0, 1))
-        return torch.from_numpy(permuted).float(), torch.from_numpy(classification).float(),  torch.from_numpy(regression).float(), torch.from_numpy(thetas).float(), torch.from_numpy(training_mask).float(), file_name
+        return torch.from_numpy(permuted).float(), torch.from_numpy(classification).float(), torch.from_numpy(regression).float(), torch.from_numpy(thetas).float(), torch.from_numpy(training_mask).float(), file_name
         # return cropped, classification, regression, thetas, training_mask, file_name
     else:
         print('could not find good crop', file_name)

@@ -8,12 +8,14 @@ import numpy as np
 import os
 import math
 import tqdm
+import cv2
 
 
 def restore_checkpoint(folder):
     model = FOTSModel().to(torch.device("cuda"))
     optimizer = torch.optim.Adam(model.parameters(), lr=0.005, weight_decay=1e-5)
-    lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=20, verbose=True, threshold=0.0001, threshold_mode='rel', cooldown=0, min_lr=0, eps=1e-08)
+    lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=10, verbose=True, threshold=0.0001, threshold_mode='rel', cooldown=0, min_lr=0, eps=1e-08)
+    # lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[1e8])
 
     if os.path.isfile(os.path.join(folder, 'last_checkpoint.pt')):
         checkpoint = torch.load(os.path.join(folder, 'last_checkpoint.pt'))
@@ -66,11 +68,47 @@ def detection_loss(pred, gt):
     h_intersect = torch.min(d1_gt, d1_pred) + torch.min(d3_gt, d3_pred)
     area_intersect = w_intersect * h_intersect
     area_union = area_gt + area_pred - area_intersect
-    tensor_loss = area_intersect / area_union + 10 * (1 - torch.cos(theta_pred - theta_gt))
+
+    # torch.set_printoptions(profile="full")
+    # print((area_intersect / area_union))
+    # print('-' * 80)
+    # print(d2_pred)
+    # torch.set_printoptions(profile="default")
+
+    tensor_loss = -torch.log(area_intersect / area_union + 1e-8) + 10 * (1 - torch.cos((theta_pred - theta_gt) * math.pi / 180.0))
     det_mask = y_true_cls * mask
     tensor_loss = tensor_loss * det_mask
     reg_loss = tensor_loss.sum() / len(det_mask.nonzero())
     return cls_loss + reg_loss
+
+
+def show_tensors(cropped, classification, regression, thetas, training_mask, file_names):
+    print(file_names[0])
+    cropped = cropped[0].to('cpu').numpy()
+    cropped = np.transpose(cropped, (1, 2, 0))
+    cropped = cv2.resize(cropped, None, fx=0.25, fy=0.25) / 255
+
+    d1, d2, d3, d4 = torch.split(regression.to('cpu'), 1, 1)
+    d1, d2, d3, d4 = d1[0].view(160, 160).detach().numpy(), d2[0].view(160, 160).detach().numpy(), d3[0].view(160, 160).detach().numpy(), d4[0].view(160, 160).detach().numpy()
+
+    thetas = thetas[0].view(160, 160).to('cpu').detach().numpy()
+
+    cv2.imshow('', cropped)
+    cv2.waitKey(0)
+    cv2.imshow('', classification[0].view(160, 160).to('cpu').detach().numpy())
+    cv2.waitKey(0)
+    cv2.imshow('', d1 / np.amax(d1))
+    cv2.waitKey(0)
+    cv2.imshow('', d2 / np.amax(d2))
+    cv2.waitKey(0)
+    cv2.imshow('', d3 / np.amax(d3))
+    cv2.waitKey(0)
+    cv2.imshow('', d4 / np.amax(d4))
+    cv2.waitKey(0)
+    cv2.imshow('', thetas / np.amin(thetas))
+    cv2.waitKey(0)
+    cv2.imshow('', training_mask[0].to('cpu').detach().numpy())
+    cv2.waitKey(0)
 
 
 def fit(start_epoch, model, loss_func, opt, lr_scheduler, best_score, max_batches_per_iter_cnt, checkpoint_dir, train_dl, valid_dl):
@@ -79,11 +117,16 @@ def fit(start_epoch, model, loss_func, opt, lr_scheduler, best_score, max_batche
         model.train()
         train_loss_stats = 0.0
         loss_count_stats = 0
-        pbar = tqdm.tqdm(train_dl, 'Epoch ' + str(epoch), ncols=120)
+        pbar = tqdm.tqdm(train_dl, 'Epoch ' + str(epoch), ncols=80)
         for cropped, classification, regression, thetas, training_mask, file_names in pbar:
             if batch_per_iter_cnt == 0:
                 optimizer.zero_grad()
             prediction = model(cropped.to('cuda'))
+
+            # show_tensors(cropped, classification, regression, thetas, training_mask, file_names)
+
+            # show_tensors(cropped, *prediction, training_mask, file_names)
+
             loss = loss_func(prediction, (classification, regression, thetas, training_mask, file_names))
             train_loss_stats += loss.item()
             loss_count_stats += len(cropped)
@@ -93,8 +136,9 @@ def fit(start_epoch, model, loss_func, opt, lr_scheduler, best_score, max_batche
             if batch_per_iter_cnt == max_batches_per_iter_cnt:
                 opt.step()
                 batch_per_iter_cnt = 0
-                pbar.set_postfix({'Mean loss over the epoch': train_loss_stats / loss_count_stats}, refresh=False)
+                pbar.set_postfix({'Mean loss': train_loss_stats / loss_count_stats}, refresh=False)
         lr_scheduler.step(train_loss_stats / loss_count_stats, epoch)
+        # lr_scheduler.step()
 
         if valid_dl is None:
             val_loss = train_loss_stats / loss_count_stats
