@@ -132,6 +132,6 @@ class FOTSModel(nn.Module):
         geoMap = self.geoMap(final)
         geoMap = torch.sigmoid(geoMap) * geoMap.shape[2]
         angleMap = self.angleMap(final)
-        angleMap = torch.sigmoid(angleMap) * -90  # TODO do I really need sigmoid
+        angleMap = torch.sigmoid(angleMap) * 90
 
         return score, geoMap, angleMap

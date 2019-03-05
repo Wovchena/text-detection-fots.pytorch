@@ -96,18 +96,18 @@ def transform(im, quads, texts, file_name, normalizer, icdar):
         thetas = np.zeros(classification.shape, dtype=float)
         for quad_i in range(len(minAreaRects)):
             minAreaRect = minAreaRects[quad_i]
+            assert (minAreaRect[2] >= -90) and (minAreaRect[2] <= 0), 'angle: {}'.format(minAreaRect[2])
             shrunk_minAreaRect = minAreaRect[0], (minAreaRect[1][0] * 0.4, minAreaRect[1][1] * 0.4), minAreaRect[2]
             poly = cv2.boxPoints(minAreaRect)
-            max_y_point_id = np.argmax(poly[:, 1])
-
-            if np.count_nonzero(poly[:, 1] == poly[max_y_point_id, 1]) == 2:  # angle == -90
-                poly = np.array([poly[2], poly[3], poly[0], poly[1]])
+            if minAreaRect[2] >= -45:
+                poly = np.array([poly[1], poly[2], poly[3], poly[0]])
             else:
-                if minAreaRect[2] <= -45:
-                    poly = np.array([poly[1], poly[2], poly[3], poly[0]])
-                else:
-                    poly = np.array([poly[2], poly[3], poly[0], poly[1]])
-
+                poly = np.array([poly[2], poly[3], poly[0], poly[1]])
+            angle_cos = (poly[2, 0] - poly[3, 0]) / np.sqrt((poly[2, 0] - poly[3, 0])**2 + (poly[2, 1] - poly[3, 1])**2 + 1e-5)
+            angle = np.arccos(angle_cos)
+            if poly[2, 1] > poly[3, 1]:
+                angle *= -1
+            angle += 45 * np.pi / 180  # [0, 90] for learning, actually [-45, 45]
             int_poly = np.int0(poly)
             if smaller_bounds[quad_i][0] >= good_crop_point[0] and smaller_bounds[quad_i][1] >= good_crop_point[1] \
                     and bigger_bounds[quad_i][0] <= good_crop_point[0] + 160 and bigger_bounds[quad_i][1] <= good_crop_point[1] + 160:
@@ -122,7 +122,7 @@ def transform(im, quads, texts, file_name, normalizer, icdar):
                     for plane in range(3):  # TODO looks that it is really slow
                         regression[(plane,) + tuple(point)] = point_dist_to_line(int_poly[plane], int_poly[plane + 1], np.array((point[1], point[0])))
                     regression[(3,) + tuple(point)] = point_dist_to_line(int_poly[3], int_poly[0], np.array((point[1], point[0])))
-                thetas[points] = np.abs(minAreaRect[2]) * 180 / np.pi
+                thetas[points] = angle
             else:
                 cv2.fillConvexPoly(training_mask, int_poly, 0)
         cropped = cv2.cvtColor(cropped, cv2.COLOR_BGR2RGB).astype(np.float32) / 255

@@ -64,20 +64,14 @@ def detection_loss(pred, gt):
     d1_pred, d2_pred, d3_pred, d4_pred = torch.split(y_pred_geo, 1, 1)
     area_gt = (d1_gt + d3_gt) * (d2_gt + d4_gt)
     area_pred = (d1_pred + d3_pred) * (d2_pred + d4_pred)
-    w_intersect = torch.min(d2_gt, d2_pred) + torch.min(d4_gt, d4_pred)  # w or h, who cares
+    w_intersect = torch.min(d2_gt, d2_pred) + torch.min(d4_gt, d4_pred)
     h_intersect = torch.min(d1_gt, d1_pred) + torch.min(d3_gt, d3_pred)
     area_intersect = w_intersect * h_intersect
     area_union = area_gt + area_pred - area_intersect
 
-    # torch.set_printoptions(profile="full")
-    # print((area_intersect / area_union))
-    # print('-' * 80)
-    # print(d2_pred)
-    # torch.set_printoptions(profile="default")
-
-    tensor_loss = -torch.log(area_intersect / area_union + 1e-8) + 10 * (1 - torch.cos((theta_pred - theta_gt)))
+    tensor_loss = -torch.log((area_intersect+1) / (area_union+1)) + 10 * (1 - torch.cos((theta_pred - theta_gt)))
     det_mask = y_true_cls * mask
-    tensor_loss = tensor_loss * det_mask
+    tensor_loss = tensor_loss * det_mask  # for shrunk only
     reg_loss = tensor_loss.sum() / len(det_mask.nonzero())
     return reg_loss + cls_loss
 
@@ -129,17 +123,38 @@ def fit(start_epoch, model, loss_func, opt, lr_scheduler, best_score, max_batche
                     cv2.imshow('img', img[:, :, ::-1])
 
                     cls = classification[batch_id].data.cpu().numpy()
-                    cls = cv2.resize(cls, (0, 0), fx=4, fy=4, interpolation=cv2.INTER_AREA)
+                    #cls = cv2.resize(cls, (0, 0), fx=4, fy=4, interpolation=cv2.INTER_AREA)
 
                     mask = training_mask[batch_id].data.cpu().numpy()
-                    mask = cv2.resize(mask, (0, 0), fx=4, fy=4, interpolation=cv2.INTER_AREA)
+                    #mask = cv2.resize(mask, (0, 0), fx=4, fy=4, interpolation=cv2.INTER_AREA)
                     cv2.imshow('mask', mask)
                     cv2.imshow('cls', cls*mask)
 
                     top_dist = regression[batch_id, 0].data.cpu().numpy()
                     top_dist /= top_dist.max()
-                    top_dist = cv2.resize(top_dist, (0, 0), fx=4, fy=4, interpolation=cv2.INTER_AREA)
+                    #top_dist = cv2.resize(top_dist, (0, 0), fx=4, fy=4, interpolation=cv2.INTER_AREA)
                     cv2.imshow('top_dist', top_dist)
+
+                    right_dist = regression[batch_id, 1].data.cpu().numpy()
+                    right_dist /= right_dist.max()
+                    #right_dist = cv2.resize(right_dist, (0, 0), fx=4, fy=4, interpolation=cv2.INTER_AREA)
+                    cv2.imshow('right_dist', right_dist)
+
+                    bottom_dist = regression[batch_id, 2].data.cpu().numpy()
+                    bottom_dist /= bottom_dist.max()
+                    #bottom_dist = cv2.resize(bottom_dist, (0, 0), fx=4, fy=4, interpolation=cv2.INTER_AREA)
+                    cv2.imshow('bottom_dist', bottom_dist)
+
+                    left_dist = regression[batch_id, 3].data.cpu().numpy()
+                    left_dist /= left_dist.max()
+                    #left_dist = cv2.resize(left_dist, (0, 0), fx=4, fy=4, interpolation=cv2.INTER_AREA)
+                    cv2.imshow('left_dist', left_dist)
+
+
+                    angle = thetas[batch_id].data.cpu().numpy()
+                    #angle /= angle.max()
+                    #left_dist = cv2.resize(left_dist, (0, 0), fx=4, fy=4, interpolation=cv2.INTER_AREA)
+                    cv2.imshow('angle', (angle / np.pi * 180).astype(np.uint8))
 
                     cv2.waitKey()
 
