@@ -5,17 +5,18 @@ import cv2
 import numpy as np
 import re
 import math
+import torchvision
 
 
 def point_dist_to_line(p1, p2, p3):
     # compute the distance from p3 to p1-p2
     if not np.array_equal(p1, p2):
-        return np.abs(np.cross(p2 - p1, p1 - p3)) / np.linalg.norm(p2 - p1)
+        return np.linalg.norm(np.cross(p2 - p1, p1 - p3)) / np.linalg.norm(p2 - p1)
     else:
         return np.linalg.norm(p3 - p1)
 
 
-def transform(im, quads, texts, file_name, icdar):
+def transform(im, quads, texts, file_name, normalizer, icdar):
     # upscale
     upscaled = cv2.resize(im, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
     quads = quads * 2
@@ -97,6 +98,16 @@ def transform(im, quads, texts, file_name, icdar):
             minAreaRect = minAreaRects[quad_i]
             shrunk_minAreaRect = minAreaRect[0], (minAreaRect[1][0] * 0.4, minAreaRect[1][1] * 0.4), minAreaRect[2]
             poly = cv2.boxPoints(minAreaRect)
+            max_y_point_id = np.argmax(poly[:, 1])
+
+            if np.count_nonzero(poly[:, 1] == poly[max_y_point_id, 1]) == 2:  # angle == -90
+                poly = np.array([poly[2], poly[3], poly[0], poly[1]])
+            else:
+                if minAreaRect[2] <= -45:
+                    poly = np.array([poly[1], poly[2], poly[3], poly[0]])
+                else:
+                    poly = np.array([poly[2], poly[3], poly[0], poly[1]])
+
             int_poly = np.int0(poly)
             if smaller_bounds[quad_i][0] >= good_crop_point[0] and smaller_bounds[quad_i][1] >= good_crop_point[1] \
                     and bigger_bounds[quad_i][0] <= good_crop_point[0] + 160 and bigger_bounds[quad_i][1] <= good_crop_point[1] + 160:
@@ -110,12 +121,17 @@ def transform(im, quads, texts, file_name, icdar):
                 for point in pointsT:
                     for plane in range(3):  # TODO looks that it is really slow
                         regression[(plane,) + tuple(point)] = point_dist_to_line(int_poly[plane], int_poly[plane + 1], np.array((point[1], point[0])))
-                        regression[(3,) + tuple(point)] = point_dist_to_line(int_poly[3], int_poly[0], np.array((point[1], point[0])))
-                thetas[points] = minAreaRect[2]
+                    regression[(3,) + tuple(point)] = point_dist_to_line(int_poly[3], int_poly[0], np.array((point[1], point[0])))
+                thetas[points] = np.abs(minAreaRect[2]) * 180 / np.pi
             else:
                 cv2.fillConvexPoly(training_mask, int_poly, 0)
+        cropped = cv2.cvtColor(cropped, cv2.COLOR_BGR2RGB).astype(np.float32) / 255
         permuted = np.transpose(cropped, (2, 0, 1))
-        return torch.from_numpy(permuted).float(), torch.from_numpy(classification).float(), torch.from_numpy(regression).float(), torch.from_numpy(thetas).float(), torch.from_numpy(training_mask).float(), file_name
+        permuted = torch.from_numpy(permuted).float()
+
+        permuted = normalizer(permuted)
+
+        return permuted, torch.from_numpy(classification).float(), torch.from_numpy(regression).float(), torch.from_numpy(thetas).float(), torch.from_numpy(training_mask).float(), file_name
         # return cropped, classification, regression, thetas, training_mask, file_name
     else:
         print('could not find good crop', file_name)
@@ -130,6 +146,8 @@ class ICDAR2015(torch.utils.data.Dataset):
         self.labels_dir = 'ch4_training_localization_transcription_gt'
         self.image_prefix = []
         self.pattern = re.compile('^' + '(\\d+),' * 8 + '(.+)$')
+        self.normalizer = torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                                           std=[0.229, 0.224, 0.225])
         if train: # TODO else
             for dirEntry in os.scandir(os.path.join(root, 'ch4_training_images')):
                 if str(dirEntry.name) != 'img_636.jpg' and str(dirEntry.name) != 'img_624.jpg':
@@ -150,7 +168,7 @@ class ICDAR2015(torch.utils.data.Dataset):
             quads.append(numbers.reshape((4, 2)))
             texts.append('###' == matches[8])
 
-        return transform(img, np.stack(quads), texts, self.image_prefix[idx], self)
+        return transform(img, np.stack(quads), texts, self.image_prefix[idx], self.normalizer, self)
 
 
 if '__main__' == __name__:

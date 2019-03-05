@@ -11,13 +11,13 @@ import tqdm
 import cv2
 
 
-def restore_checkpoint(folder):
+def restore_checkpoint(folder, contunue):
     model = FOTSModel().to(torch.device("cuda"))
     optimizer = torch.optim.Adam(model.parameters(), lr=0.005, weight_decay=1e-5)
     lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=10, verbose=True, threshold=0.0001, threshold_mode='rel', cooldown=0, min_lr=0, eps=1e-08)
-    # lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[1e8])
+    #lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[4, 8, 14])
 
-    if os.path.isfile(os.path.join(folder, 'last_checkpoint.pt')):
+    if os.path.isfile(os.path.join(folder, 'last_checkpoint.pt')) and contunue:
         checkpoint = torch.load(os.path.join(folder, 'last_checkpoint.pt'))
         epoch = checkpoint['epoch'] + 1
         model.load_state_dict(checkpoint['model_state_dict'])
@@ -38,7 +38,7 @@ def save_checkpoint(epoch, model, optimizer, lr_scheduler, best_score, folder, s
         print('Updated best_model')
     torch.save({
         'epoch': epoch,
-        'model_state_dict': model.state_dict(),
+        'model_state_dict': model.module.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
         'lr_scheduler_state_dict': lr_scheduler.state_dict(),
         'best_score': best_score  # not current score
@@ -75,11 +75,11 @@ def detection_loss(pred, gt):
     # print(d2_pred)
     # torch.set_printoptions(profile="default")
 
-    tensor_loss = -torch.log(area_intersect / area_union + 1e-8) + 10 * (1 - torch.cos((theta_pred - theta_gt) * math.pi / 180.0))
+    tensor_loss = -torch.log(area_intersect / area_union + 1e-8) + 10 * (1 - torch.cos((theta_pred - theta_gt)))
     det_mask = y_true_cls * mask
     tensor_loss = tensor_loss * det_mask
     reg_loss = tensor_loss.sum() / len(det_mask.nonzero())
-    return cls_loss + reg_loss
+    return reg_loss + cls_loss
 
 
 def show_tensors(cropped, classification, regression, thetas, training_mask, file_names):
@@ -123,6 +123,26 @@ def fit(start_epoch, model, loss_func, opt, lr_scheduler, best_score, max_batche
                 optimizer.zero_grad()
             prediction = model(cropped.to('cuda'))
 
+            if 0:
+                for batch_id in range(cropped.shape[0]):
+                    img = cropped[batch_id].data.cpu().numpy().transpose((1, 2, 0)) * [0.229, 0.224, 0.225] + [0.485, 0.456, 0.406]
+                    cv2.imshow('img', img[:, :, ::-1])
+
+                    cls = classification[batch_id].data.cpu().numpy()
+                    cls = cv2.resize(cls, (0, 0), fx=4, fy=4, interpolation=cv2.INTER_AREA)
+
+                    mask = training_mask[batch_id].data.cpu().numpy()
+                    mask = cv2.resize(mask, (0, 0), fx=4, fy=4, interpolation=cv2.INTER_AREA)
+                    cv2.imshow('mask', mask)
+                    cv2.imshow('cls', cls*mask)
+
+                    top_dist = regression[batch_id, 0].data.cpu().numpy()
+                    top_dist /= top_dist.max()
+                    top_dist = cv2.resize(top_dist, (0, 0), fx=4, fy=4, interpolation=cv2.INTER_AREA)
+                    cv2.imshow('top_dist', top_dist)
+
+                    cv2.waitKey()
+
             # show_tensors(cropped, classification, regression, thetas, training_mask, file_names)
 
             # show_tensors(cropped, *prediction, training_mask, file_names)
@@ -138,7 +158,7 @@ def fit(start_epoch, model, loss_func, opt, lr_scheduler, best_score, max_batche
                 batch_per_iter_cnt = 0
                 pbar.set_postfix({'Mean loss': train_loss_stats / loss_count_stats}, refresh=False)
         lr_scheduler.step(train_loss_stats / loss_count_stats, epoch)
-        # lr_scheduler.step()
+        #lr_scheduler.step()
 
         if valid_dl is None:
             val_loss = train_loss_stats / loss_count_stats
@@ -169,10 +189,13 @@ if __name__ == '__main__':
     parser.add_argument('--batch-size', type=int, default=8, help='Number of batches to process before train step')
     parser.add_argument('--batches-before-train', type=int, default=4, help='Number of batches to process before train step')
     parser.add_argument('--num-workers', type=int, default=8, help='Path to folder with train images and labels')
+    parser.add_argument('--continue-training', action='store_true', help='continue training')
     args = parser.parse_args()
 
     icdar = datasets.ICDAR2015(args.train_folder, True, datasets.transform)
-    dl = torch.utils.data.DataLoader(icdar, batch_size=args.batch_size, shuffle=True, sampler=None, batch_sampler=None, num_workers=args.num_workers)
+    dl = torch.utils.data.DataLoader(icdar, batch_size=args.batch_size, shuffle=True,
+                                     sampler=None, batch_sampler=None, num_workers=args.num_workers)
     checkoint_dir = 'runs'
-    epoch, model, optimizer, lr_scheduler, best_score = restore_checkpoint(checkoint_dir)
+    epoch, model, optimizer, lr_scheduler, best_score = restore_checkpoint(checkoint_dir, args.continue_training)
+    model = torch.nn.DataParallel(model)
     fit(epoch, model, detection_loss, optimizer, lr_scheduler, best_score, args.batches_before_train, checkoint_dir, dl, None)
