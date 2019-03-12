@@ -1,10 +1,13 @@
-import torch
-import torch.utils.data
+import math
 import os
+import random
+import re
+
 import cv2
 import numpy as np
-import re
-import math
+import scipy.io
+import torch
+import torch.utils.data
 import torchvision
 
 
@@ -16,10 +19,11 @@ def point_dist_to_line(p1, p2, p3):
         return np.linalg.norm(p3 - p1)
 
 
-def transform(im, quads, texts, file_name, normalizer, icdar):
+def transform(im, quads, texts, normalizer, icdar):
     # upscale
-    upscaled = cv2.resize(im, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
-    quads = quads * 2
+    scale = 2560 / np.maximum(im.shape[0], im.shape[1])
+    upscaled = cv2.resize(im, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+    quads = quads * scale
     # rotate
     # grab the dimensions of the image and then determine the
     # center
@@ -67,7 +71,7 @@ def transform(im, quads, texts, file_name, normalizer, icdar):
     the_biggest_crop_point_x = min(math.ceil(the_biggest_bound_x), stretched.shape[1] // 4 - 160)
     the_biggest_crop_point_y = min(math.ceil(the_biggest_bound_y), stretched.shape[0] // 4 - 160)
     if the_smallest_crop_point_x >= the_biggest_crop_point_x or the_smallest_crop_point_y >= the_biggest_crop_point_y:  # torch.randint requires this
-        print('cant crop ', file_name)
+        #print('cant crop ', file_name)
         return icdar[torch.randint(low=0, high=len(icdar), size=(1,), dtype=torch.int16).item()]
     good_crop_point = None  # (150, 0)
     for _ in range(100):  # TODO it can be better to find intersections with rboxes or quads and remove if str(dirEntry.name) != 'img_636.jpg' and str(dirEntry.name) != 'img_624.jpg'
@@ -96,7 +100,7 @@ def transform(im, quads, texts, file_name, normalizer, icdar):
         thetas = np.zeros(classification.shape, dtype=float)
         for quad_i in range(len(minAreaRects)):
             minAreaRect = minAreaRects[quad_i]
-            assert (minAreaRect[2] >= -90) and (minAreaRect[2] <= 0), 'angle: {}'.format(minAreaRect[2])
+            #assert (minAreaRect[2] >= -90) and (minAreaRect[2] <= 0), 'angle: {}'.format(minAreaRect[2])
             shrunk_minAreaRect = minAreaRect[0], (minAreaRect[1][0] * 0.4, minAreaRect[1][1] * 0.4), minAreaRect[2]
             poly = cv2.boxPoints(minAreaRect)
             if minAreaRect[2] >= -45:
@@ -131,10 +135,10 @@ def transform(im, quads, texts, file_name, normalizer, icdar):
 
         permuted = normalizer(permuted)
 
-        return permuted, torch.from_numpy(classification).float(), torch.from_numpy(regression).float(), torch.from_numpy(thetas).float(), torch.from_numpy(training_mask).float(), file_name
+        return permuted, torch.from_numpy(classification).float(), torch.from_numpy(regression).float(), torch.from_numpy(thetas).float(), torch.from_numpy(training_mask).float()
         # return cropped, classification, regression, thetas, training_mask, file_name
     else:
-        print('could not find good crop', file_name)
+        #print('could not find good crop', file_name)
         return icdar[torch.randint(low=0, high=len(icdar), size=(1,), dtype=torch.int16).item()]
 
 
@@ -168,7 +172,35 @@ class ICDAR2015(torch.utils.data.Dataset):
             quads.append(numbers.reshape((4, 2)))
             texts.append('###' == matches[8])
 
-        return transform(img, np.stack(quads), texts, self.image_prefix[idx], self.normalizer, self)
+        return transform(img, np.stack(quads), texts, self.normalizer, self)
+
+
+class SynthText(torch.utils.data.Dataset):
+    def __init__(self, root, train, transform):
+        self.transform = transform
+        self.root = root
+        self.labels = scipy.io.loadmat(os.path.join(root, 'gt.mat'))
+        #sample_path = labels['imnames'][0, 1][0]
+        #sample_boxes = np.transpose(labels['wordBB'][0, 1], (2, 1, 0))
+        self.pattern = re.compile('^' + '(\\d+),' * 8 + '(.+)$')
+        self.normalizer = torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                                           std=[0.229, 0.224, 0.225])
+
+    def __len__(self):
+        return self.labels['imnames'].shape[1] // 20
+
+    def __getitem__(self, idx):
+        idx = (idx * 20) + random.randint(0, 19)  # compensate dataset size, while maintain diversity
+        img = cv2.imread(os.path.join(self.root, self.labels['imnames'][0, idx][0]), cv2.IMREAD_COLOR).astype(np.float32)
+        quads = []
+        texts = []
+        coordinates = self.labels['wordBB'][0, idx]
+        if len(coordinates.shape) == 2:
+            coordinates = np.expand_dims(coordinates, axis=2)
+        quads.extend(np.transpose(coordinates, (2, 1, 0)))
+        texts.append('not used')
+
+        return transform(img, np.stack(quads), texts, self.normalizer, self)
 
 
 if '__main__' == __name__:

@@ -1,137 +1,85 @@
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
 
 
-def mean_image_subtraction(images, means=[123.68, 116.78, 103.94]):
-    '''
-    image normalization
-    :param images: bs * w * h * channel
-    :param means:
-    :return:
-    '''
-    num_channels = images.data.shape[1]
-    if len(means) != num_channels:
-        raise ValueError('len(means) must match the number of channels')
-    for i in range(num_channels):
-        images.data[:, i, :, :] -= means[i]
-
-    return images
+def conv(in_channels, out_channels, kernel_size=3, padding=1, bn=True, dilation=1, stride=1, relu=True, bias=True):
+    modules = [nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding, dilation, bias=bias)]
+    if bn:
+        modules.append(nn.BatchNorm2d(out_channels))
+    if relu:
+        modules.append(nn.ReLU(inplace=True))
+    return nn.Sequential(*modules)
 
 
-class DummyLayer(nn.Module):
-    def __init__(self):
-        super(DummyLayer, self).__init__()
+class Decoder(nn.Module):
+    def __init__(self, in_channels, squeeze_channels):
+        super().__init__()
+        self.squeeze = conv(in_channels, squeeze_channels)
 
-    def forward(self, input_f):
-        return input_f
-
-
-class HLayer(nn.Module):
-    def __init__(self, inputChannels, outputChannels):
-        """
-
-        :param inputChannels: channels of g+f
-        :param outputChannels:
-        """
-        super(HLayer, self).__init__()
-
-        self.conv2dOne = nn.Conv2d(inputChannels, outputChannels, kernel_size=1)
-        self.bnOne = nn.BatchNorm2d(outputChannels, momentum=0.003)
-
-        self.conv2dTwo = nn.Conv2d(outputChannels, outputChannels, kernel_size=3, padding=1)
-        self.bnTwo = nn.BatchNorm2d(outputChannels, momentum=0.003)
-
-    def forward(self, inputPrevG, inputF):
-        input = torch.cat([inputPrevG, inputF], dim=1)
-        output = self.conv2dOne(input)
-        output = self.bnOne(output)
-        output = F.relu(output)
-
-        output = self.conv2dTwo(output)
-        output = self.bnTwo(output)
-        output = F.relu(output)
-
-        return output
+    def forward(self, x, encoder_features):
+        x = self.squeeze(x)
+        x = F.interpolate(x, size=(encoder_features.shape[2], encoder_features.shape[3]),
+                          mode='bilinear', align_corners=True)
+        up = torch.cat([encoder_features, x], 1)
+        return up
 
 
 class FOTSModel(nn.Module):
-    def __init__(self):
-        super(FOTSModel, self).__init__()
+    def __init__(self, crop_height=640):
+        super().__init__()
+        self.crop_height = crop_height
+        self.resnet = torchvision.models.resnet34(pretrained=True)
+        self.conv1 = nn.Sequential(
+            self.resnet.conv1,
+            self.resnet.bn1,
+            self.resnet.relu,
+        )  # 64
+        self.encoder1 = self.resnet.layer1  # 64
+        self.encoder2 = self.resnet.layer2  # 128
+        self.encoder3 = self.resnet.layer3  # 256
+        self.encoder4 = self.resnet.layer4  # 512
 
-        self.backbone = torchvision.models.resnet50(pretrained=True)
+        self.center = nn.Sequential(
+            conv(512, 512, stride=2),
+            conv(512, 1024)
+        )
 
-        self.mergeLayers0 = DummyLayer()
+        self.decoder4 = Decoder(1024, 512)
+        self.decoder3 = Decoder(1024, 256)
+        self.decoder2 = Decoder(512, 128)
+        self.decoder1 = Decoder(256, 64)
+        self.remove_artifacts = conv(128, 64)
 
-        self.mergeLayers1 = HLayer(2048 + 1024, 128)
-        self.mergeLayers2 = HLayer(128 + 512, 64)
-        self.mergeLayers3 = HLayer(64 + 256, 32)
+        self.confidence = conv(64, 1, kernel_size=1, padding=0, bn=False, relu=False)
+        self.distances = conv(64, 4, kernel_size=1, padding=0, bn=False, relu=False)
+        self.angle = conv(64, 1, kernel_size=1, padding=0, bn=False, relu=False)
 
-        self.mergeLayers4 = nn.Conv2d(32, 32, kernel_size=3, padding=1)
-        self.bn5 = nn.BatchNorm2d(32, momentum=0.003)
+    def forward(self, x):
+        x = self.conv1(x)
+        x = F.max_pool2d(x, kernel_size=2, stride=2)
 
-        # Output Layers
-        self.scoreMap = nn.Conv2d(32, 1, kernel_size=1)
-        self.geoMap = nn.Conv2d(32, 4, kernel_size=1)
-        self.angleMap = nn.Conv2d(32, 1, kernel_size=1)
+        e1 = self.encoder1(x)
+        e2 = self.encoder2(e1)
+        e3 = self.encoder3(e2)
+        e4 = self.encoder4(e3)
 
-    def foward_backbone(self, input):
-        conv2 = None
-        conv3 = None
-        conv4 = None
-        output = None
+        f = self.center(e4)
 
-        for name, layer in self.backbone.named_children():
-            input = layer(input)
-            if name == 'layer1':
-                conv2 = input
-            elif name == 'layer2':
-                conv3 = input
-            elif name == 'layer3':
-                conv4 = input
-            elif name == 'layer4':
-                output = input
-                break
+        d4 = self.decoder4(f, e4)
+        d3 = self.decoder3(d4, e3)
+        d2 = self.decoder2(d3, e2)
+        d1 = self.decoder1(d2, e1)
 
-        return output, conv4, conv3, conv2
+        final = self.remove_artifacts(d1)
 
-    def unpool(self, input):
-        return F.interpolate(input, mode='bilinear', scale_factor=2, align_corners=True)
+        confidence = self.confidence(final)
+        confidence = torch.sigmoid(confidence)
+        distances = self.distances(final)
+        distances = torch.sigmoid(distances) * (self.crop_height / 4)
+        angle = self.angle(final)
+        angle = torch.sigmoid(angle) * np.pi / 2
 
-    def forward(self, input):
-        # input = self.mean_image_subtraction(input)
-        f = self.foward_backbone(input)
-
-        g = [None] * 4
-        h = [None] * 4
-
-        # i = 1
-        h[0] = self.mergeLayers0(f[0])
-        g[0] = self.unpool(h[0])
-
-        # i = 2
-        h[1] = self.mergeLayers1(g[0], f[1])
-        g[1] = self.unpool(h[1])
-
-        # i = 3
-        h[2] = self.mergeLayers2(g[1], f[2])
-        g[2] = self.unpool(h[2])
-
-        # i = 4
-        h[3] = self.mergeLayers3(g[2], f[3])
-
-        # final stage
-        final = self.mergeLayers4(h[3])
-        final = self.bn5(final)
-        final = F.relu(final)
-
-        score = self.scoreMap(final)
-        score = torch.sigmoid(score)
-
-        geoMap = self.geoMap(final)
-        geoMap = torch.sigmoid(geoMap) * geoMap.shape[2]
-        angleMap = self.angleMap(final)
-        angleMap = torch.sigmoid(angleMap) * 90
-
-        return score, geoMap, angleMap
+        return confidence, distances, angle
