@@ -64,14 +64,14 @@ def transform(im, quads, texts, normalizer, icdar):
         smaller_bounds.append(smaller_bound)
         bigger_bound = np.amax(quad, axis=0, out=None, keepdims=False)
         bigger_bounds.append(bigger_bound)
-    the_smallest_bound_x, the_smallest_bound_y = np.amin(smaller_bounds, axis=0)
-    the_biggest_bound_x, the_biggest_bound_y = np.amax(smaller_bounds, axis=0)
+    the_smallest_bound_x, the_smallest_bound_y = np.amin(np.array(smaller_bounds)[texts], axis=0)
+    the_biggest_bound_x, the_biggest_bound_y = np.amax(np.array(smaller_bounds)[texts], axis=0)  # top left corner of corp region will be randomed, so there is max(smaller_bounds)
     the_smallest_crop_point_x = max(int(the_smallest_bound_x) - 160, 0)
     the_smallest_crop_point_y = max(int(the_smallest_bound_y) - 160, 0)
     the_biggest_crop_point_x = min(math.ceil(the_biggest_bound_x), stretched.shape[1] // 4 - 160)
     the_biggest_crop_point_y = min(math.ceil(the_biggest_bound_y), stretched.shape[0] // 4 - 160)
     if the_smallest_crop_point_x >= the_biggest_crop_point_x or the_smallest_crop_point_y >= the_biggest_crop_point_y:  # torch.randint requires this
-        #print('cant crop ', file_name)
+        print('cant crop')
         return icdar[torch.randint(low=0, high=len(icdar), size=(1,), dtype=torch.int16).item()]
     good_crop_point = None  # (150, 0)
     for _ in range(100):  # TODO it can be better to find intersections with rboxes or quads and remove if str(dirEntry.name) != 'img_636.jpg' and str(dirEntry.name) != 'img_624.jpg'
@@ -79,7 +79,7 @@ def transform(im, quads, texts, normalizer, icdar):
                       torch.randint(low=the_smallest_crop_point_y, high=the_biggest_crop_point_y, size=(1,), dtype=torch.int16).item())
         covered_at_least_one_quad = False
         for quad_i in range(len(quads)):
-            if smaller_bounds[quad_i][0] >= crop_point[0] and smaller_bounds[quad_i][1] >= crop_point[1] \
+            if texts[quad_i] and smaller_bounds[quad_i][0] >= crop_point[0] and smaller_bounds[quad_i][1] >= crop_point[1] \
                     and bigger_bounds[quad_i][0] <= crop_point[0] + 160 and bigger_bounds[quad_i][1] <= crop_point[1] + 160:
                 covered_at_least_one_quad = True
                 break
@@ -118,7 +118,8 @@ def transform(im, quads, texts, normalizer, icdar):
                 tmp_regression.fill(0)
                 cv2.fillConvexPoly(classification, int_poly, 1)
                 cv2.fillConvexPoly(training_mask, int_poly, 0)
-                cv2.fillConvexPoly(training_mask, np.int0(cv2.boxPoints(shrunk_minAreaRect)), 1)
+                if texts[quad_i]:  # dont account ###
+                    cv2.fillConvexPoly(training_mask, np.int0(cv2.boxPoints(shrunk_minAreaRect)), 1)
                 cv2.fillConvexPoly(tmp_regression, int_poly, 1)
                 points = np.nonzero(tmp_regression)
                 pointsT = np.transpose(points)
@@ -136,9 +137,8 @@ def transform(im, quads, texts, normalizer, icdar):
         permuted = normalizer(permuted)
 
         return permuted, torch.from_numpy(classification).float(), torch.from_numpy(regression).float(), torch.from_numpy(thetas).float(), torch.from_numpy(training_mask).float()
-        # return cropped, classification, regression, thetas, training_mask, file_name
     else:
-        #print('could not find good crop', file_name)
+        # print('could not find good crop')
         return icdar[torch.randint(low=0, high=len(icdar), size=(1,), dtype=torch.int16).item()]
 
 
@@ -170,9 +170,13 @@ class ICDAR2015(torch.utils.data.Dataset):
             matches = self.pattern.findall(line)[0]
             numbers = np.array(matches[:8], dtype=float)
             quads.append(numbers.reshape((4, 2)))
-            texts.append('###' == matches[8])
+            texts.append('###' != matches[8])
+        for trainable in texts:
+            if trainable:  # at least one trainable quad
+                return transform(img, np.stack(quads), texts, self.normalizer, self)
+        # print('no trainable quads', self.image_prefix[idx])
+        return self[torch.randint(low=0, high=len(self), size=(1,), dtype=torch.int16).item()]
 
-        return transform(img, np.stack(quads), texts, self.normalizer, self)
 
 
 class SynthText(torch.utils.data.Dataset):
@@ -198,7 +202,7 @@ class SynthText(torch.utils.data.Dataset):
         if len(coordinates.shape) == 2:
             coordinates = np.expand_dims(coordinates, axis=2)
         quads.extend(np.transpose(coordinates, (2, 1, 0)))
-        texts.append('not used')
+        texts.append(True)
 
         return transform(img, np.stack(quads), texts, self.normalizer, self)
 
@@ -206,16 +210,15 @@ class SynthText(torch.utils.data.Dataset):
 if '__main__' == __name__:
     import torch
     icdar = ICDAR2015('C:\\Users\\vzlobin\\Documents\\repo\\FOTS.PyTorch\\data\\icdar\\icdar2015\\4.4\\training', True, transform)
-    # dl = torch.utils.data.DataLoader(icdar, batch_size=2, shuffle=False, sampler=None, batch_sampler=None, num_workers=1, pin_memory = False, drop_last = False, timeout = 0, worker_init_fn = None)
-    # for cropped, classification, regression, thetas, training_mask, file_names in dl:
-    #     print(file_names)
+    # dl = torch.utils.data.DataLoader(icdar, batch_size=4, shuffle=False, sampler=None, batch_sampler=None, num_workers=4, pin_memory = False, drop_last = False, timeout = 0, worker_init_fn = None)
     for image_i in range(len(icdar)):
-        crop, classif, regression, thetas, training_mask, file_name = icdar[image_i]
-        # cv2.imshow('', crop / 255)
-        # cv2.waitKey(0)
-        # cv2.imshow('', training_mask * 255)
-        # cv2.waitKey(0)
-        # cv2.imshow('', classif * 255)
+        normalized, classification, regression, thetas, training_mask = icdar[image_i]
+        permuted = normalized * torch.tensor([0.229, 0.224, 0.225])[:, None, None] + torch.tensor([0.485, 0.456, 0.406])[:, None, None]
+        cropped = permuted.permute(1, 2, 0).numpy()
+        cv2.imshow('img', cropped[:, :, ::-1])
+        cv2.imshow('training_mask', training_mask.numpy() * 255)
+        cv2.waitKey(0)
+        # cv2.imshow('', classification * 255)
         # cv2.waitKey(0)
         # for i in range(4):
         #     m = np.amax(regression[i])

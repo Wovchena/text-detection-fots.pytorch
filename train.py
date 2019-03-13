@@ -24,7 +24,7 @@ def restore_checkpoint(folder, contunue):
         checkpoint = torch.load(os.path.join(folder, 'last_checkpoint.pt'))
         epoch = checkpoint['epoch'] + 1
         model.load_state_dict(checkpoint['model_state_dict'])
-
+        # return 0, model, optimizer, lr_scheduler, +math.inf
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         lr_scheduler.load_state_dict(checkpoint['lr_scheduler_state_dict'])
         best_score = checkpoint['best_score']
@@ -281,7 +281,7 @@ def fit(start_epoch, model, loss_func, opt, lr_scheduler, best_score, max_batche
                     val_loss += loss.item()
                     val_loss_count += len(cropped)
             val_loss /= val_loss_count
-        print('Val loss: ', val_loss)
+        # print('Val loss: ', val_loss)
 
         if best_score > val_loss:
             best_score = val_loss
