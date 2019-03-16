@@ -64,14 +64,19 @@ def transform(im, quads, texts, normalizer, icdar):
         smaller_bounds.append(smaller_bound)
         bigger_bound = np.amax(quad, axis=0, out=None, keepdims=False)
         bigger_bounds.append(bigger_bound)
-    the_smallest_bound_x, the_smallest_bound_y = np.amin(np.array(smaller_bounds)[texts], axis=0)
-    the_biggest_bound_x, the_biggest_bound_y = np.amax(np.array(smaller_bounds)[texts], axis=0)  # top left corner of corp region will be randomed, so there is max(smaller_bounds)
+    smaller_bounds_of_trainable_quads = np.array(smaller_bounds)[texts]
+    if len(smaller_bounds_of_trainable_quads):
+        the_smallest_bound_x, the_smallest_bound_y = np.amin(smaller_bounds_of_trainable_quads, axis=0)
+        the_biggest_bound_x, the_biggest_bound_y = np.amax(smaller_bounds_of_trainable_quads, axis=0)  # top left corner of corp region will be randomed, so there is max(smaller_bounds)
+    else:
+        the_smallest_bound_x, the_smallest_bound_y = 0, 0
+        the_biggest_bound_x, the_biggest_bound_y = stretched.shape[1] // 4 - 160, stretched.shape[0] // 4 - 160
     the_smallest_crop_point_x = max(int(the_smallest_bound_x) - 160, 0)
     the_smallest_crop_point_y = max(int(the_smallest_bound_y) - 160, 0)
     the_biggest_crop_point_x = min(math.ceil(the_biggest_bound_x), stretched.shape[1] // 4 - 160)
     the_biggest_crop_point_y = min(math.ceil(the_biggest_bound_y), stretched.shape[0] // 4 - 160)
     if the_smallest_crop_point_x >= the_biggest_crop_point_x or the_smallest_crop_point_y >= the_biggest_crop_point_y:  # torch.randint requires this
-        print('cant crop')
+        # print('cant crop')
         return icdar[torch.randint(low=0, high=len(icdar), size=(1,), dtype=torch.int16).item()]
     good_crop_point = None  # (150, 0)
     for _ in range(100):  # TODO it can be better to find intersections with rboxes or quads and remove if str(dirEntry.name) != 'img_636.jpg' and str(dirEntry.name) != 'img_624.jpg'
@@ -89,7 +94,7 @@ def transform(im, quads, texts, normalizer, icdar):
     if good_crop_point:
         cropped = stretched[good_crop_point[1] * 4:good_crop_point[1] * 4 + 640, good_crop_point[0] * 4:good_crop_point[0] * 4 + 640]
         quads -= np.array(good_crop_point)
-        int_quads = np.rint(quads).astype(int)
+        int_quads = quads.round().astype(int)
         minAreaRects = [cv2.minAreaRect(int_quad) for int_quad in int_quads]
         # cropped = cv2.resize(cropped, None, fx=0.25, fy=0.25)  # TODO comment!!!
         # cv2.polylines(cropped, int_quads, True, (0, 255, 255))   # TODO comment!!!
@@ -101,18 +106,19 @@ def transform(im, quads, texts, normalizer, icdar):
         for quad_i in range(len(minAreaRects)):
             minAreaRect = minAreaRects[quad_i]
             #assert (minAreaRect[2] >= -90) and (minAreaRect[2] <= 0), 'angle: {}'.format(minAreaRect[2])
-            shrunk_minAreaRect = minAreaRect[0], (minAreaRect[1][0] * 0.4, minAreaRect[1][1] * 0.4), minAreaRect[2]
+            shrinkage = min(minAreaRect[1][0], minAreaRect[1][1]) * 0.6
+            shrunk_minAreaRect = minAreaRect[0], (minAreaRect[1][0] - shrinkage, minAreaRect[1][1] - shrinkage), minAreaRect[2]
             poly = cv2.boxPoints(minAreaRect)
             if minAreaRect[2] >= -45:
                 poly = np.array([poly[1], poly[2], poly[3], poly[0]])
             else:
                 poly = np.array([poly[2], poly[3], poly[0], poly[1]])
-            angle_cos = (poly[2, 0] - poly[3, 0]) / np.sqrt((poly[2, 0] - poly[3, 0])**2 + (poly[2, 1] - poly[3, 1])**2 + 1e-5)
+            angle_cos = (poly[2, 0] - poly[3, 0]) / np.sqrt((poly[2, 0] - poly[3, 0])**2 + (poly[2, 1] - poly[3, 1])**2 + 1e-5)  # TODO tg or ctg
             angle = np.arccos(angle_cos)
             if poly[2, 1] > poly[3, 1]:
                 angle *= -1
-            angle += 45 * np.pi / 180  # [0, 90] for learning, actually [-45, 45]
-            int_poly = np.int0(poly)
+            angle += 45 * np.pi / 180  # [0, pi/2] for learning, actually [-pi/4, pi/4]
+            int_poly = poly.round().astype(int)
             if smaller_bounds[quad_i][0] >= good_crop_point[0] and smaller_bounds[quad_i][1] >= good_crop_point[1] \
                     and bigger_bounds[quad_i][0] <= good_crop_point[0] + 160 and bigger_bounds[quad_i][1] <= good_crop_point[1] + 160:
                 tmp_regression.fill(0)
@@ -143,7 +149,7 @@ def transform(im, quads, texts, normalizer, icdar):
 
 
 class ICDAR2015(torch.utils.data.Dataset):
-    def __init__(self, root, train, transform):
+    def __init__(self, root, transform):
         self.transform = transform
         self.root = root
         self.img_dir = 'ch4_training_images'
@@ -152,10 +158,9 @@ class ICDAR2015(torch.utils.data.Dataset):
         self.pattern = re.compile('^' + '(\\d+),' * 8 + '(.+)$')
         self.normalizer = torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                                            std=[0.229, 0.224, 0.225])
-        if train: # TODO else
-            for dirEntry in os.scandir(os.path.join(root, 'ch4_training_images')):
-                if str(dirEntry.name) != 'img_636.jpg' and str(dirEntry.name) != 'img_624.jpg':
-                    self.image_prefix.append(dirEntry.name[:-4])
+        for dirEntry in os.scandir(os.path.join(root, 'ch4_training_images')):
+            if str(dirEntry.name) != 'img_636.jpg' and str(dirEntry.name) != 'img_624.jpg':
+                self.image_prefix.append(dirEntry.name[:-4])
 
     def __len__(self):
         return len(self.image_prefix)
@@ -176,7 +181,6 @@ class ICDAR2015(torch.utils.data.Dataset):
                 return transform(img, np.stack(quads), texts, self.normalizer, self)
         # print('no trainable quads', self.image_prefix[idx])
         return self[torch.randint(low=0, high=len(self), size=(1,), dtype=torch.int16).item()]
-
 
 
 class SynthText(torch.utils.data.Dataset):
@@ -202,14 +206,13 @@ class SynthText(torch.utils.data.Dataset):
         if len(coordinates.shape) == 2:
             coordinates = np.expand_dims(coordinates, axis=2)
         quads.extend(np.transpose(coordinates, (2, 1, 0)))
-        texts.append(True)
+        texts.extend([True] * len(quads))
 
         return transform(img, np.stack(quads), texts, self.normalizer, self)
 
 
 if '__main__' == __name__:
-    import torch
-    icdar = ICDAR2015('C:\\Users\\vzlobin\\Documents\\repo\\FOTS.PyTorch\\data\\icdar\\icdar2015\\4.4\\training', True, transform)
+    icdar = ICDAR2015('C:\\Users\\vzlobin\\Documents\\repo\\FOTS.PyTorch\\data\\icdar\\icdar2015\\4.4\\training', transform)
     # dl = torch.utils.data.DataLoader(icdar, batch_size=4, shuffle=False, sampler=None, batch_sampler=None, num_workers=4, pin_memory = False, drop_last = False, timeout = 0, worker_init_fn = None)
     for image_i in range(len(icdar)):
         normalized, classification, regression, thetas, training_mask = icdar[image_i]

@@ -27,7 +27,7 @@ def test(net, images_folder, output_folder, scaled_height):
         confidence = confidence.squeeze().data.cpu().numpy()
         distances = distances.squeeze().data.cpu().numpy()
         angle = angle.squeeze().data.cpu().numpy()
-        polys = parse_polys(confidence, distances, angle)#, img=orig_scaled_image)
+        polys = parse_polys(confidence, distances, angle, 0.95, 0.3)#, img=orig_scaled_image)
         with open('{}'.format(os.path.join(output_folder, 'res_{}.txt'.format(prefix))), 'w') as f:
             for id in range(polys.shape[0]):
                 f.write('{}, {}, {}, {}, {}, {}, {}, {}\n'.format(

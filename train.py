@@ -103,7 +103,7 @@ def detection_loss(pred, gt):
     h_intersect = torch.min(d1_gt, d1_pred) + torch.min(d3_gt, d3_pred)
     area_intersect = w_intersect * h_intersect
     area_union = area_gt + area_pred - area_intersect
-    raw_tensor_loss = -torch.log((area_intersect+1) / (area_union+1)) + 10 * (1 - torch.cos((theta_pred - theta_gt)))
+    raw_tensor_loss = -torch.log((area_intersect+1) / (area_union+1)) + 10 * (1 - torch.cos(theta_pred - theta_gt))
 
     ohem_cls_mask = np.zeros(raw_cls_loss.shape, dtype=np.float32)
     ohem_reg_mask = np.zeros(raw_cls_loss.shape, dtype=np.float32)
@@ -151,11 +151,19 @@ def detection_loss(pred, gt):
 
             cv2.waitKey()
 
-    raw_cls_loss = raw_cls_loss * torch.from_numpy(ohem_cls_mask).cuda()
-    raw_cls_loss = raw_cls_loss.sum() / int(ohem_cls_mask.sum())
+    ohem_cls_mask_sum = int(ohem_cls_mask.sum())
+    ohem_reg_mask_sum = int(ohem_reg_mask.sum())
+    if 0 != ohem_cls_mask_sum:
+        raw_cls_loss = raw_cls_loss * torch.from_numpy(ohem_cls_mask).cuda()
+        raw_cls_loss = raw_cls_loss.sum() / ohem_cls_mask_sum
+    else:
+        raw_cls_loss = 0
 
-    raw_tensor_loss = raw_tensor_loss * torch.from_numpy(ohem_reg_mask).cuda()
-    reg_loss = raw_tensor_loss.sum() / int(ohem_reg_mask.sum())
+    if 0 != ohem_reg_mask_sum:
+        raw_tensor_loss = raw_tensor_loss * torch.from_numpy(ohem_reg_mask).cuda()
+        reg_loss = raw_tensor_loss.sum() / ohem_reg_mask_sum
+    else:
+        reg_loss = 0
     return reg_loss + raw_cls_loss
 
 
@@ -249,8 +257,7 @@ def fit(start_epoch, model, loss_func, opt, lr_scheduler, best_score, max_batche
                     ##angle /= angle.max()
                     ##left_dist = cv2.resize(left_dist, (0, 0), fx=4, fy=4, interpolation=cv2.INTER_AREA)
                     #cv2.imshow('angle', (angle * cls_bin / np.pi * 180).astype(np.uint8))
-                    #
-                    cv2.waitKey()
+                    #cv2.waitKey()
 
             # show_tensors(cropped, classification, regression, thetas, training_mask, file_names)
 
@@ -300,7 +307,7 @@ if __name__ == '__main__':
     parser.add_argument('--continue-training', action='store_true', help='continue training')
     args = parser.parse_args()
 
-    icdar = datasets.ICDAR2015(args.train_folder, True, datasets.transform)
+    icdar = datasets.ICDAR2015(args.train_folder, datasets.transform)
     #icdar = datasets.SynthText(args.train_folder, True, datasets.transform)
     dl = torch.utils.data.DataLoader(icdar, batch_size=args.batch_size, shuffle=True,
                                      sampler=None, batch_sampler=None, num_workers=args.num_workers)
