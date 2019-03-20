@@ -9,6 +9,7 @@ import scipy.io
 import torch
 import torch.utils.data
 import torchvision
+from shapely.geometry import Polygon, box
 
 
 def point_dist_to_line(p1, p2, p3):
@@ -57,95 +58,65 @@ def transform(im, quads, texts, normalizer, icdar):
     nH = int(nH)
     # crop
     quads /= 4
-    smaller_bounds = []
-    bigger_bounds = []
-    for quad in quads:
-        smaller_bound = np.amin(quad, axis=0, out=None, keepdims=False)
-        smaller_bounds.append(smaller_bound)
-        bigger_bound = np.amax(quad, axis=0, out=None, keepdims=False)
-        bigger_bounds.append(bigger_bound)
-    smaller_bounds_of_trainable_quads = np.array(smaller_bounds)[texts]
-    if len(smaller_bounds_of_trainable_quads):
-        the_smallest_bound_x, the_smallest_bound_y = np.amin(smaller_bounds_of_trainable_quads, axis=0)
-        the_biggest_bound_x, the_biggest_bound_y = np.amax(smaller_bounds_of_trainable_quads, axis=0)  # top left corner of corp region will be randomed, so there is max(smaller_bounds)
-    else:
-        the_smallest_bound_x, the_smallest_bound_y = 0, 0
-        the_biggest_bound_x, the_biggest_bound_y = stretched.shape[1] // 4 - 160, stretched.shape[0] // 4 - 160
-    the_smallest_crop_point_x = max(int(the_smallest_bound_x) - 160, 0)
-    the_smallest_crop_point_y = max(int(the_smallest_bound_y) - 160, 0)
-    the_biggest_crop_point_x = min(math.ceil(the_biggest_bound_x), stretched.shape[1] // 4 - 160)
-    the_biggest_crop_point_y = min(math.ceil(the_biggest_bound_y), stretched.shape[0] // 4 - 160)
-    if the_smallest_crop_point_x >= the_biggest_crop_point_x or the_smallest_crop_point_y >= the_biggest_crop_point_y:  # torch.randint requires this
-        # print('cant crop')
-        return icdar[torch.randint(low=0, high=len(icdar), size=(1,), dtype=torch.int16).item()]
-    good_crop_point = None  # (150, 0)
-    for _ in range(100):  # TODO it can be better to find intersections with rboxes or quads and remove if str(dirEntry.name) != 'img_636.jpg' and str(dirEntry.name) != 'img_624.jpg'
-        crop_point = (torch.randint(low=the_smallest_crop_point_x, high=the_biggest_crop_point_x, size=(1,), dtype=torch.int16).item(),
-                      torch.randint(low=the_smallest_crop_point_y, high=the_biggest_crop_point_y, size=(1,), dtype=torch.int16).item())
-        covered_at_least_one_quad = False
-        for quad_i in range(len(quads)):
-            if texts[quad_i] and smaller_bounds[quad_i][0] >= crop_point[0] and smaller_bounds[quad_i][1] >= crop_point[1] \
-                    and bigger_bounds[quad_i][0] <= crop_point[0] + 160 and bigger_bounds[quad_i][1] <= crop_point[1] + 160:
-                covered_at_least_one_quad = True
-                break
-        if covered_at_least_one_quad:
-            good_crop_point = crop_point
-            break
-    if good_crop_point:
-        cropped = stretched[good_crop_point[1] * 4:good_crop_point[1] * 4 + 640, good_crop_point[0] * 4:good_crop_point[0] * 4 + 640]
-        quads -= np.array(good_crop_point)
-        int_quads = quads.round().astype(int)
-        minAreaRects = [cv2.minAreaRect(int_quad) for int_quad in int_quads]
-        # cropped = cv2.resize(cropped, None, fx=0.25, fy=0.25)  # TODO comment!!!
-        # cv2.polylines(cropped, int_quads, True, (0, 255, 255))   # TODO comment!!!
-        training_mask = np.ones((160, 160), dtype=float)  # TODO take NOT CARE texts into account
-        classification = np.zeros((160, 160), dtype=float)
-        regression = np.zeros((4,) + classification.shape, dtype=float)
-        tmp_regression = np.empty(classification.shape, dtype=float)
-        thetas = np.zeros(classification.shape, dtype=float)
-        for quad_i in range(len(minAreaRects)):
-            minAreaRect = minAreaRects[quad_i]
-            #assert (minAreaRect[2] >= -90) and (minAreaRect[2] <= 0), 'angle: {}'.format(minAreaRect[2])
+    crop_point = (torch.randint(low=0, high=stretched.shape[1] // 4 - 160, size=(1,), dtype=torch.int16).item(),
+                  torch.randint(low=0, high=stretched.shape[0] // 4 - 160, size=(1,), dtype=torch.int16).item())
+    crop_box = box(crop_point[0], crop_point[1], crop_point[0] + 160, crop_point[1] + 160)
+
+    training_mask = np.ones((160, 160), dtype=float)
+    classification = np.zeros((160, 160), dtype=float)
+    regression = np.zeros((4,) + classification.shape, dtype=float)
+    tmp_cls = np.empty(classification.shape, dtype=float)
+    thetas = np.zeros(classification.shape, dtype=float)
+
+    for quad_id, quad in enumerate(quads):
+        polygon = Polygon(quad)
+        intersected_polygon = polygon.intersection(crop_box)
+        if type(intersected_polygon) is Polygon:
+            minAreaRect = cv2.minAreaRect(quad.astype(np.float32))
             shrinkage = min(minAreaRect[1][0], minAreaRect[1][1]) * 0.6
-            shrunk_minAreaRect = minAreaRect[0], (minAreaRect[1][0] - shrinkage, minAreaRect[1][1] - shrinkage), minAreaRect[2]
-            poly = cv2.boxPoints(minAreaRect)
-            if minAreaRect[2] >= -45:
-                poly = np.array([poly[1], poly[2], poly[3], poly[0]])
-            else:
-                poly = np.array([poly[2], poly[3], poly[0], poly[1]])
-            angle_cos = (poly[2, 0] - poly[3, 0]) / np.sqrt((poly[2, 0] - poly[3, 0])**2 + (poly[2, 1] - poly[3, 1])**2 + 1e-5)  # TODO tg or ctg
-            angle = np.arccos(angle_cos)
-            if poly[2, 1] > poly[3, 1]:
-                angle *= -1
-            angle += 45 * np.pi / 180  # [0, pi/2] for learning, actually [-pi/4, pi/4]
-            int_poly = poly.round().astype(int)
-            if smaller_bounds[quad_i][0] >= good_crop_point[0] and smaller_bounds[quad_i][1] >= good_crop_point[1] \
-                    and bigger_bounds[quad_i][0] <= good_crop_point[0] + 160 and bigger_bounds[quad_i][1] <= good_crop_point[1] + 160:
-                tmp_regression.fill(0)
-                cv2.fillConvexPoly(classification, int_poly, 1)
-                cv2.fillConvexPoly(training_mask, int_poly, 0)
-                if texts[quad_i]:  # dont account ###
-                    cv2.fillConvexPoly(training_mask, np.int0(cv2.boxPoints(shrunk_minAreaRect)), 1)
-                cv2.fillConvexPoly(tmp_regression, int_poly, 1)
-                points = np.nonzero(tmp_regression)
+            intersected_quad = np.array(intersected_polygon.exterior.coords[:-1])
+            intersected_quad -= crop_point
+            intersected_minAreaRect = cv2.minAreaRect(intersected_quad.astype(np.float32))
+            cv2.fillConvexPoly(training_mask, cv2.boxPoints(intersected_minAreaRect).round().astype(int), 0)
+            shrunk_width_and_height = (intersected_minAreaRect[1][0] - shrinkage, intersected_minAreaRect[1][1] - shrinkage)
+            if shrunk_width_and_height[0] >= 0 and shrunk_width_and_height[1] >= 0 and texts[quad_id]:
+                shrunk_minAreaRect = intersected_minAreaRect[0], shrunk_width_and_height, intersected_minAreaRect[2]
+                shrunk_minAreaRect_boxPoints = cv2.boxPoints(shrunk_minAreaRect)
+
+                poly = shrunk_minAreaRect_boxPoints
+                if shrunk_minAreaRect[2] >= -45:
+                    poly = np.array([poly[1], poly[2], poly[3], poly[0]])
+                else:
+                    poly = np.array([poly[2], poly[3], poly[0], poly[1]])
+                angle_cos = (poly[2, 0] - poly[3, 0]) / np.sqrt(
+                    (poly[2, 0] - poly[3, 0]) ** 2 + (poly[2, 1] - poly[3, 1]) ** 2 + 1e-5)  # TODO tg or ctg
+                angle = np.arccos(angle_cos)
+                if poly[2, 1] > poly[3, 1]:
+                    angle *= -1
+                angle += 45 * np.pi / 180  # [0, pi/2] for learning, actually [-pi/4, pi/4]
+
+                tmp_cls.fill(0)
+                cv2.fillConvexPoly(tmp_cls, shrunk_minAreaRect_boxPoints.round().astype(int), 1)
+                cv2.rectangle(tmp_cls, (0, 0), (tmp_cls.shape[1] - 1, tmp_cls.shape[0] - 1), 0, thickness=int(round(shrinkage * 2)))
+                classification += tmp_cls
+                training_mask += tmp_cls
+                thetas += tmp_cls * angle
+
+                points = np.nonzero(tmp_cls)
                 pointsT = np.transpose(points)
                 for point in pointsT:
                     for plane in range(3):  # TODO looks that it is really slow
-                        regression[(plane,) + tuple(point)] = point_dist_to_line(int_poly[plane], int_poly[plane + 1], np.array((point[1], point[0])))
-                    regression[(3,) + tuple(point)] = point_dist_to_line(int_poly[3], int_poly[0], np.array((point[1], point[0])))
-                thetas[points] = angle
-            else:
-                cv2.fillConvexPoly(training_mask, int_poly, 0)
-        cropped = cv2.cvtColor(cropped, cv2.COLOR_BGR2RGB).astype(np.float32) / 255
-        permuted = np.transpose(cropped, (2, 0, 1))
-        permuted = torch.from_numpy(permuted).float()
-
-        permuted = normalizer(permuted)
-
-        return permuted, torch.from_numpy(classification).float(), torch.from_numpy(regression).float(), torch.from_numpy(thetas).float(), torch.from_numpy(training_mask).float()
-    else:
-        # print('could not find good crop')
-        return icdar[torch.randint(low=0, high=len(icdar), size=(1,), dtype=torch.int16).item()]
+                        regression[(plane,) + tuple(point)] = point_dist_to_line(poly[plane], poly[plane + 1],
+                                                                                 np.array((point[1], point[0])))
+                    regression[(3,) + tuple(point)] = point_dist_to_line(poly[3], poly[0],
+                                                                         np.array((point[1], point[0])))
+    cropped = stretched[crop_point[1] * 4:crop_point[1] * 4 + 640, crop_point[0] * 4:crop_point[0] * 4 + 640]
+    cropped = cv2.cvtColor(cropped, cv2.COLOR_BGR2RGB).astype(np.float64) / 255
+    permuted = np.transpose(cropped, (2, 0, 1))
+    permuted = torch.from_numpy(permuted).float()
+    permuted = normalizer(permuted)
+    return permuted, torch.from_numpy(classification).float(), torch.from_numpy(regression).float(), torch.from_numpy(
+        thetas).float(), torch.from_numpy(training_mask).float()
 
 
 class ICDAR2015(torch.utils.data.Dataset):
@@ -159,8 +130,7 @@ class ICDAR2015(torch.utils.data.Dataset):
         self.normalizer = torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                                            std=[0.229, 0.224, 0.225])
         for dirEntry in os.scandir(os.path.join(root, 'ch4_training_images')):
-            if str(dirEntry.name) != 'img_636.jpg' and str(dirEntry.name) != 'img_624.jpg':
-                self.image_prefix.append(dirEntry.name[:-4])
+            self.image_prefix.append(dirEntry.name[:-4])
 
     def __len__(self):
         return len(self.image_prefix)
@@ -176,11 +146,7 @@ class ICDAR2015(torch.utils.data.Dataset):
             numbers = np.array(matches[:8], dtype=float)
             quads.append(numbers.reshape((4, 2)))
             texts.append('###' != matches[8])
-        for trainable in texts:
-            if trainable:  # at least one trainable quad
-                return transform(img, np.stack(quads), texts, self.normalizer, self)
-        # print('no trainable quads', self.image_prefix[idx])
-        return self[torch.randint(low=0, high=len(self), size=(1,), dtype=torch.int16).item()]
+        return transform(img, np.stack(quads), texts, self.normalizer, self)
 
 
 class SynthText(torch.utils.data.Dataset):
@@ -218,17 +184,20 @@ if '__main__' == __name__:
         normalized, classification, regression, thetas, training_mask = icdar[image_i]
         permuted = normalized * torch.tensor([0.229, 0.224, 0.225])[:, None, None] + torch.tensor([0.485, 0.456, 0.406])[:, None, None]
         cropped = permuted.permute(1, 2, 0).numpy()
-        cv2.imshow('img', cropped[:, :, ::-1])
+        cv2.imshow('orig', cropped[:, :, ::-1])
+        cropped = cv2.resize(cropped, (160, 160))
+        cv2.imshow('img', cropped[:, :, ::-1] * training_mask.numpy()[:, :, None])
         cv2.imshow('training_mask', training_mask.numpy() * 255)
+        cv2.imshow('classification', classification.numpy() * 255)
         cv2.waitKey(0)
-        # cv2.imshow('', classification * 255)
-        # cv2.waitKey(0)
-        # for i in range(4):
-        #     m = np.amax(regression[i])
-        #     cv2.imshow('', regression[i, :, :] / m)
-        #     cv2.waitKey(0)
-        # minim = np.amin(thetas)
-        # thetas = thetas - minim
-        # m = np.amax(thetas)
-        # cv2.imshow('', np.array(np.around(thetas * 255 / m), dtype=np.uint8))
-        # cv2.waitKey(0)
+        regression = regression.numpy()
+        for i in range(4):
+            m = np.amax(regression[i])
+            cv2.imshow('', regression[i, :, :] / m)
+            cv2.waitKey(0)
+        thetas = thetas.numpy()
+        minim = np.amin(thetas)
+        m = np.amax(thetas)
+        print(m * 180 / np.pi)
+        cv2.imshow('', np.array(np.around(thetas * 255 / m * 180 / np.pi), dtype=np.uint8))
+        cv2.waitKey(0)

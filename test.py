@@ -7,6 +7,7 @@ import torch
 
 from model import FOTSModel
 from modules.parse_polys import parse_polys
+import re
 
 
 def test(net, images_folder, output_folder, scaled_height):
@@ -34,6 +35,35 @@ def test(net, images_folder, output_folder, scaled_height):
                     int(polys[id, 0] / scale_x), int(polys[id, 1] / scale_y), int(polys[id, 2] / scale_x), int(polys[id, 3] / scale_y),
                     int(polys[id, 4] / scale_x), int(polys[id, 5] / scale_y), int(polys[id, 6] / scale_x), int(polys[id, 7] / scale_y)
                 ))
+        # visualize
+        # reshaped_pred_polys = []
+        # for id in range(polys.shape[0]):
+        #     reshaped_pred_polys.append(np.array([int(polys[id, 0] / scale_x), int(polys[id, 1] / scale_y), int(polys[id, 2] / scale_x), int(polys[id, 3] / scale_y),
+        #                 int(polys[id, 4] / scale_x), int(polys[id, 5] / scale_y), int(polys[id, 6] / scale_x), int(polys[id, 7] / scale_y)]).reshape((4, 2)))
+        #     numpy_reshaped_pred_polys = np.stack(reshaped_pred_polys)
+        # strong_gt_quads = []
+        # weak_gt_quads = []
+        # lines = [line.rstrip('\n') for line in open(os.path.join(os.path.join(images_folder, '..\\Challenge4_Test_Task4_GT'), 'gt_' + image_name[:-4] + '.txt'),
+        #                                             encoding='utf-8-sig')]
+        # pattern = re.compile('^' + '(\\d+),' * 8 + '(.+)$')
+        # for line in lines:
+        #     matches = pattern.findall(line)[0]
+        #     numbers = np.array(matches[:8], dtype=float)
+        #     if '###' == matches[8]:
+        #         weak_gt_quads.append(numbers.reshape((4, 2)))
+        #     else:
+        #         strong_gt_quads.append(numbers.reshape((4, 2)))
+        # if len(strong_gt_quads):
+        #     numpy_strong_gt_quads = np.stack(strong_gt_quads)
+        #     cv2.polylines(image, numpy_strong_gt_quads.round().astype(int), True, (0, 0, 255))
+        # if len(weak_gt_quads):
+        #     numpy_weak_gt_quads = np.stack(weak_gt_quads)
+        #     cv2.polylines(image, numpy_weak_gt_quads.round().astype(int), True, (0, 255, 255))
+        #
+        # cv2.polylines(image, numpy_reshaped_pred_polys.round().astype(int), True, (255, 0, 0))
+        # cv2.imshow('img', image)
+        # print(image_name)
+        # cv2.waitKey(0)
 
 
 if __name__ == '__main__':

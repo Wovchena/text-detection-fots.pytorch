@@ -17,7 +17,7 @@ from modules.parse_polys import parse_polys
 def restore_checkpoint(folder, contunue):
     model = FOTSModel().to(torch.device("cuda"))
     optimizer = torch.optim.Adam(model.parameters(), lr=0.005, weight_decay=1e-5)
-    lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=10, verbose=True, threshold=0.0001, threshold_mode='rel')
+    lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=25, verbose=True, threshold=0.0001, threshold_mode='rel')
     #lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[3, 8, 14])
 
     if os.path.isfile(os.path.join(folder, 'last_checkpoint.pt')) and contunue:
@@ -118,7 +118,7 @@ def detection_loss(pred, gt):
 
         shrunk_sum = int(shrunk_mask.sum())
         if shrunk_sum != 0:
-            ohem_cls_mask[batch_id, 0, shrunk_mask != 0] = 1 #/ shrunk_sum
+            ohem_cls_mask[batch_id, 0, shrunk_mask == 1] = 1 #/ shrunk_sum
         raw_loss = raw_cls_loss[batch_id].squeeze().data.cpu().numpy()
         raw_loss[neg_mask == 0] = 0
         raw_loss = torch.from_numpy(raw_loss)
@@ -126,7 +126,7 @@ def detection_loss(pred, gt):
         fill_ohem_mask(raw_loss, ohem_cls_mask[batch_id, 0], num_neg, 512, 512)
 
         raw_loss = raw_tensor_loss[batch_id].squeeze().data.cpu().numpy()
-        raw_loss[shrunk_mask != 1] = 0
+        raw_loss[shrunk_mask == 0] = 0
         raw_loss = torch.from_numpy(raw_loss)
         num_pos = int(shrunk_mask.sum())
         fill_ohem_mask(raw_loss, ohem_reg_mask[batch_id, 0], num_pos, 128, 128)
@@ -150,7 +150,6 @@ def detection_loss(pred, gt):
             cv2.imshow('ohem_reg', ohem_reg_mask[batch_id, 0])
 
             cv2.waitKey()
-
     ohem_cls_mask_sum = int(ohem_cls_mask.sum())
     ohem_reg_mask_sum = int(ohem_reg_mask.sum())
     if 0 != ohem_cls_mask_sum:
