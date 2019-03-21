@@ -77,14 +77,14 @@ def transform(im, quads, texts, normalizer, icdar):
             intersected_quad = np.array(intersected_polygon.exterior.coords[:-1])
             intersected_quad -= crop_point
             intersected_minAreaRect = cv2.minAreaRect(intersected_quad.astype(np.float32))
-            cv2.fillConvexPoly(training_mask, cv2.boxPoints(intersected_minAreaRect).round().astype(int), 0)
+            intersected_minAreaRect_boxPoints = cv2.boxPoints(intersected_minAreaRect)
+            cv2.fillConvexPoly(training_mask, intersected_minAreaRect_boxPoints.round().astype(int), 0)
             shrunk_width_and_height = (intersected_minAreaRect[1][0] - shrinkage, intersected_minAreaRect[1][1] - shrinkage)
             if shrunk_width_and_height[0] >= 0 and shrunk_width_and_height[1] >= 0 and texts[quad_id]:
                 shrunk_minAreaRect = intersected_minAreaRect[0], shrunk_width_and_height, intersected_minAreaRect[2]
-                shrunk_minAreaRect_boxPoints = cv2.boxPoints(shrunk_minAreaRect)
 
-                poly = shrunk_minAreaRect_boxPoints
-                if shrunk_minAreaRect[2] >= -45:
+                poly = intersected_minAreaRect_boxPoints
+                if intersected_minAreaRect[2] >= -45:
                     poly = np.array([poly[1], poly[2], poly[3], poly[0]])
                 else:
                     poly = np.array([poly[2], poly[3], poly[0], poly[1]])
@@ -96,7 +96,8 @@ def transform(im, quads, texts, normalizer, icdar):
                 angle += 45 * np.pi / 180  # [0, pi/2] for learning, actually [-pi/4, pi/4]
 
                 tmp_cls.fill(0)
-                cv2.fillConvexPoly(tmp_cls, shrunk_minAreaRect_boxPoints.round().astype(int), 1)
+                round_shrink_minAreaRect_boxPoints = cv2.boxPoints(shrunk_minAreaRect)
+                cv2.fillConvexPoly(tmp_cls, round_shrink_minAreaRect_boxPoints.round(out=round_shrink_minAreaRect_boxPoints).astype(int), 1)
                 cv2.rectangle(tmp_cls, (0, 0), (tmp_cls.shape[1] - 1, tmp_cls.shape[0] - 1), 0, thickness=int(round(shrinkage * 2)))
                 classification += tmp_cls
                 training_mask += tmp_cls

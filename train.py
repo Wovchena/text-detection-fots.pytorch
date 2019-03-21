@@ -256,7 +256,7 @@ def fit(start_epoch, model, loss_func, opt, lr_scheduler, best_score, max_batche
                     ##angle /= angle.max()
                     ##left_dist = cv2.resize(left_dist, (0, 0), fx=4, fy=4, interpolation=cv2.INTER_AREA)
                     #cv2.imshow('angle', (angle * cls_bin / np.pi * 180).astype(np.uint8))
-                    #cv2.waitKey()
+                    cv2.waitKey()
 
             # show_tensors(cropped, classification, regression, thetas, training_mask, file_names)
 

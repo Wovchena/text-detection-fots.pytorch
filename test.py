@@ -43,7 +43,7 @@ def test(net, images_folder, output_folder, scaled_height):
         #     numpy_reshaped_pred_polys = np.stack(reshaped_pred_polys)
         # strong_gt_quads = []
         # weak_gt_quads = []
-        # lines = [line.rstrip('\n') for line in open(os.path.join(os.path.join(images_folder, '..\\Challenge4_Test_Task4_GT'), 'gt_' + image_name[:-4] + '.txt'),
+        # lines = [line.rstrip('\n') for line in open(os.path.join(os.path.join(images_folder, '../Challenge4_Test_Task4_GT'), 'gt_' + image_name[:-4] + '.txt'),
         #                                             encoding='utf-8-sig')]
         # pattern = re.compile('^' + '(\\d+),' * 8 + '(.+)$')
         # for line in lines:
@@ -59,7 +59,6 @@ def test(net, images_folder, output_folder, scaled_height):
         # if len(weak_gt_quads):
         #     numpy_weak_gt_quads = np.stack(weak_gt_quads)
         #     cv2.polylines(image, numpy_weak_gt_quads.round().astype(int), True, (0, 255, 255))
-        #
         # cv2.polylines(image, numpy_reshaped_pred_polys.round().astype(int), True, (255, 0, 0))
         # cv2.imshow('img', image)
         # print(image_name)
