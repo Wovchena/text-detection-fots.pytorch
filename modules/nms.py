@@ -22,6 +22,8 @@ def weighted_merge(g, p):
 
 
 def standard_nms(S, thres=0.3):
+    if 0 == len(S):
+        return np.array([])
     order = np.argsort(S[:, 8])[::-1]
     keep = []
     while order.size > 0:

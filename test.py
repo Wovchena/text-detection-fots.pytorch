@@ -25,7 +25,7 @@ def test(net, images_folder, output_folder, scaled_height):
         image_tensor = torch.from_numpy(np.expand_dims(np.transpose(scaled_image, axes=(2, 0, 1)), axis=0)).float()
 
         confidence, distances, angle = net(image_tensor.cuda())
-        confidence = confidence.squeeze().data.cpu().numpy()
+        confidence = torch.sigmoid(confidence).squeeze().data.cpu().numpy()
         distances = distances.squeeze().data.cpu().numpy()
         angle = angle.squeeze().data.cpu().numpy()
         polys = parse_polys(confidence, distances, angle, 0.95, 0.3)#, img=orig_scaled_image)

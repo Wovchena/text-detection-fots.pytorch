@@ -93,7 +93,7 @@ def detection_loss(pred, gt):
     y_true_cls, theta_gt = y_true_cls.unsqueeze(1), theta_gt.unsqueeze(1)
     y_true_cls, y_true_geo, theta_gt = y_true_cls.to('cuda'), y_true_geo.to('cuda'), theta_gt.to('cuda')
 
-    raw_cls_loss = torch.nn.functional.binary_cross_entropy(input=y_pred_cls, target=y_true_cls, weight=None, reduction='none')
+    raw_cls_loss = torch.nn.functional.binary_cross_entropy_with_logits(input=y_pred_cls, target=y_true_cls, weight=None, reduction='none')
 
     d1_gt, d2_gt, d3_gt, d4_gt = torch.split(y_true_geo, 1, 1)
     d1_pred, d2_pred, d3_pred, d4_pred = torch.split(y_pred_geo, 1, 1)

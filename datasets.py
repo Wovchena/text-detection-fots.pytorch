@@ -99,6 +99,9 @@ def transform(im, quads, texts, normalizer, icdar):
                 round_shrink_minAreaRect_boxPoints = cv2.boxPoints(shrunk_minAreaRect)
                 cv2.fillConvexPoly(tmp_cls, round_shrink_minAreaRect_boxPoints.round(out=round_shrink_minAreaRect_boxPoints).astype(int), 1)
                 cv2.rectangle(tmp_cls, (0, 0), (tmp_cls.shape[1] - 1, tmp_cls.shape[0] - 1), 0, thickness=int(round(shrinkage * 2)))
+                if 0 == np.count_nonzero(tmp_cls) and 0.1 < torch.rand(1).item():
+                    return icdar[torch.randint(low=0, high=len(icdar), size=(1,), dtype=torch.int16).item()]
+
                 classification += tmp_cls
                 training_mask += tmp_cls
                 thetas += tmp_cls * angle

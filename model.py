@@ -76,7 +76,6 @@ class FOTSModel(nn.Module):
         final = self.remove_artifacts(d1)
 
         confidence = self.confidence(final)
-        confidence = torch.sigmoid(confidence)
         distances = self.distances(final)
         distances = torch.sigmoid(distances) * (self.crop_height / 4)
         angle = self.angle(final)
