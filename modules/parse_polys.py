@@ -4,7 +4,7 @@ import numpy as np
 from modules.nms import nms_locality, standard_nms
 
 
-def parse_polys(cls, distances, angle, confidence_threshold=0.5, intersection_threshold=0.3, img=None):
+def parse_polys(cls, distances, angle, confidence_threshold=0.5, intersection_threshold=0.3):
     polys = []
     height, width = cls.shape
 
@@ -41,14 +41,14 @@ def parse_polys(cls, distances, angle, confidence_threshold=0.5, intersection_th
             poly_y_center = y_rot + (poly_height / 2 - distances[0, y, x])
             poly_x_center = x_rot - (poly_width / 2 - distances[1, y, x])
             poly = [
-                int(((poly_x_center - poly_width / 2) * np.cos(poly_angle) + (poly_y_center - poly_height / 2) * np.sin(poly_angle)) * 4),
-                int((-(poly_x_center - poly_width / 2) * np.sin(poly_angle) + (poly_y_center - poly_height / 2) * np.cos(poly_angle)) * 4),
-                int(((poly_x_center + poly_width / 2) * np.cos(poly_angle) + (poly_y_center - poly_height / 2) * np.sin(poly_angle)) * 4),
-                int((-(poly_x_center + poly_width / 2) * np.sin(poly_angle) + (poly_y_center - poly_height / 2) * np.cos(poly_angle)) * 4),
-                int(((poly_x_center + poly_width / 2) * np.cos(poly_angle) + (poly_y_center + poly_height / 2) * np.sin(poly_angle)) * 4),
-                int((-(poly_x_center + poly_width / 2) * np.sin(poly_angle) + (poly_y_center + poly_height / 2) * np.cos(poly_angle)) * 4),
-                int(((poly_x_center - poly_width / 2) * np.cos(poly_angle) + (poly_y_center + poly_height / 2) * np.sin(poly_angle)) * 4),
-                int((-(poly_x_center - poly_width / 2) * np.sin(poly_angle) + (poly_y_center + poly_height / 2) * np.cos(poly_angle)) * 4),
+                int(((poly_x_center - poly_width / 2) * np.cos(poly_angle) + (poly_y_center - poly_height / 2) * np.sin(poly_angle)) * 2),
+                int((-(poly_x_center - poly_width / 2) * np.sin(poly_angle) + (poly_y_center - poly_height / 2) * np.cos(poly_angle)) * 2),
+                int(((poly_x_center + poly_width / 2) * np.cos(poly_angle) + (poly_y_center - poly_height / 2) * np.sin(poly_angle)) * 2),
+                int((-(poly_x_center + poly_width / 2) * np.sin(poly_angle) + (poly_y_center - poly_height / 2) * np.cos(poly_angle)) * 2),
+                int(((poly_x_center + poly_width / 2) * np.cos(poly_angle) + (poly_y_center + poly_height / 2) * np.sin(poly_angle)) * 2),
+                int((-(poly_x_center + poly_width / 2) * np.sin(poly_angle) + (poly_y_center + poly_height / 2) * np.cos(poly_angle)) * 2),
+                int(((poly_x_center - poly_width / 2) * np.cos(poly_angle) + (poly_y_center + poly_height / 2) * np.sin(poly_angle)) * 2),
+                int((-(poly_x_center - poly_width / 2) * np.sin(poly_angle) + (poly_y_center + poly_height / 2) * np.cos(poly_angle)) * 2),
                 cls[y, x]
             ]
             #pts = np.array(poly[:8]).reshape((4, 2)).astype(np.int32)
@@ -62,13 +62,4 @@ def parse_polys(cls, distances, angle, confidence_threshold=0.5, intersection_th
             polys.append(poly)
 
     polys = nms_locality(np.array(polys), intersection_threshold)
-    if img is not None:
-        for poly in polys:
-            pts = np.array(poly[:8]).reshape((4, 2)).astype(np.int32)
-            cv2.line(img, (pts[0, 0], pts[0, 1]), (pts[1, 0], pts[1, 1]), color=(0, 255, 0))
-            cv2.line(img, (pts[1, 0], pts[1, 1]), (pts[2, 0], pts[2, 1]), color=(0, 255, 0))
-            cv2.line(img, (pts[2, 0], pts[2, 1]), (pts[3, 0], pts[3, 1]), color=(0, 255, 0))
-            cv2.line(img, (pts[3, 0], pts[3, 1]), (pts[0, 0], pts[0, 1]), color=(0, 255, 0))
-        cv2.imshow('polys', img)
-        cv2.waitKey()
     return polys

@@ -56,7 +56,8 @@ def transform(im, quads, texts, normalizer, icdar):
     nH *= strechK
     nH = int(nH)
     # crop
-    quads /= 4
+    output_scale = 2
+    quads /= output_scale
     smaller_bounds = []
     bigger_bounds = []
     for quad in quads:
@@ -65,16 +66,17 @@ def transform(im, quads, texts, normalizer, icdar):
         bigger_bound = np.amax(quad, axis=0, out=None, keepdims=False)
         bigger_bounds.append(bigger_bound)
     smaller_bounds_of_trainable_quads = np.array(smaller_bounds)[texts]
+    crop_size = 640 // output_scale
     if len(smaller_bounds_of_trainable_quads):
         the_smallest_bound_x, the_smallest_bound_y = np.amin(smaller_bounds_of_trainable_quads, axis=0)
         the_biggest_bound_x, the_biggest_bound_y = np.amax(smaller_bounds_of_trainable_quads, axis=0)  # top left corner of corp region will be randomed, so there is max(smaller_bounds)
     else:
         the_smallest_bound_x, the_smallest_bound_y = 0, 0
-        the_biggest_bound_x, the_biggest_bound_y = stretched.shape[1] // 4 - 160, stretched.shape[0] // 4 - 160
-    the_smallest_crop_point_x = max(int(the_smallest_bound_x) - 160, 0)
-    the_smallest_crop_point_y = max(int(the_smallest_bound_y) - 160, 0)
-    the_biggest_crop_point_x = min(math.ceil(the_biggest_bound_x), stretched.shape[1] // 4 - 160)
-    the_biggest_crop_point_y = min(math.ceil(the_biggest_bound_y), stretched.shape[0] // 4 - 160)
+        the_biggest_bound_x, the_biggest_bound_y = stretched.shape[1] // output_scale - crop_size, stretched.shape[0] // output_scale - crop_size
+    the_smallest_crop_point_x = max(int(the_smallest_bound_x) - crop_size, 0)
+    the_smallest_crop_point_y = max(int(the_smallest_bound_y) - crop_size, 0)
+    the_biggest_crop_point_x = min(math.ceil(the_biggest_bound_x), stretched.shape[1] // output_scale - crop_size)
+    the_biggest_crop_point_y = min(math.ceil(the_biggest_bound_y), stretched.shape[0] // output_scale - crop_size)
     if the_smallest_crop_point_x >= the_biggest_crop_point_x or the_smallest_crop_point_y >= the_biggest_crop_point_y:  # torch.randint requires this
         # print('cant crop')
         return icdar[torch.randint(low=0, high=len(icdar), size=(1,), dtype=torch.int16).item()]
@@ -85,21 +87,21 @@ def transform(im, quads, texts, normalizer, icdar):
         covered_at_least_one_quad = False
         for quad_i in range(len(quads)):
             if texts[quad_i] and smaller_bounds[quad_i][0] >= crop_point[0] and smaller_bounds[quad_i][1] >= crop_point[1] \
-                    and bigger_bounds[quad_i][0] <= crop_point[0] + 160 and bigger_bounds[quad_i][1] <= crop_point[1] + 160:
+                    and bigger_bounds[quad_i][0] <= crop_point[0] + crop_size and bigger_bounds[quad_i][1] <= crop_point[1] + crop_size:
                 covered_at_least_one_quad = True
                 break
         if covered_at_least_one_quad:
             good_crop_point = crop_point
             break
     if good_crop_point:
-        cropped = stretched[good_crop_point[1] * 4:good_crop_point[1] * 4 + 640, good_crop_point[0] * 4:good_crop_point[0] * 4 + 640]
+        cropped = stretched[good_crop_point[1] * output_scale:good_crop_point[1] * output_scale + crop_size*output_scale, good_crop_point[0] * output_scale:good_crop_point[0] * output_scale + crop_size*output_scale]
         quads -= np.array(good_crop_point)
         int_quads = quads.round().astype(int)
         minAreaRects = [cv2.minAreaRect(int_quad) for int_quad in int_quads]
         # cropped = cv2.resize(cropped, None, fx=0.25, fy=0.25)  # TODO comment!!!
         # cv2.polylines(cropped, int_quads, True, (0, 255, 255))   # TODO comment!!!
-        training_mask = np.ones((160, 160), dtype=float)  # TODO take NOT CARE texts into account
-        classification = np.zeros((160, 160), dtype=float)
+        training_mask = np.ones((crop_size, crop_size), dtype=float)  # TODO take NOT CARE texts into account
+        classification = np.zeros((crop_size, crop_size), dtype=float)
         regression = np.zeros((4,) + classification.shape, dtype=float)
         tmp_regression = np.empty(classification.shape, dtype=float)
         thetas = np.zeros(classification.shape, dtype=float)
@@ -120,7 +122,7 @@ def transform(im, quads, texts, normalizer, icdar):
             angle += 45 * np.pi / 180  # [0, pi/2] for learning, actually [-pi/4, pi/4]
             int_poly = poly.round().astype(int)
             if smaller_bounds[quad_i][0] >= good_crop_point[0] and smaller_bounds[quad_i][1] >= good_crop_point[1] \
-                    and bigger_bounds[quad_i][0] <= good_crop_point[0] + 160 and bigger_bounds[quad_i][1] <= good_crop_point[1] + 160:
+                    and bigger_bounds[quad_i][0] <= good_crop_point[0] + crop_size and bigger_bounds[quad_i][1] <= good_crop_point[1] + crop_size:
                 tmp_regression.fill(0)
                 cv2.fillConvexPoly(classification, int_poly, 1)
                 cv2.fillConvexPoly(training_mask, int_poly, 0)
@@ -184,7 +186,7 @@ class ICDAR2015(torch.utils.data.Dataset):
 
 
 class SynthText(torch.utils.data.Dataset):
-    def __init__(self, root, train, transform):
+    def __init__(self, root, transform):
         self.transform = transform
         self.root = root
         self.labels = scipy.io.loadmat(os.path.join(root, 'gt.mat'))

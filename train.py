@@ -16,18 +16,20 @@ from modules.parse_polys import parse_polys
 
 def restore_checkpoint(folder, contunue):
     model = FOTSModel().to(torch.device("cuda"))
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.005, weight_decay=1e-5)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.0001, weight_decay=1e-5)
     lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=10, verbose=True, threshold=0.0001, threshold_mode='rel')
-    #lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[3, 8, 14])
+    #lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[3, 50, 100])
 
-    if os.path.isfile(os.path.join(folder, 'last_checkpoint.pt')) and contunue:
-        checkpoint = torch.load(os.path.join(folder, 'last_checkpoint.pt'))
+    checkpoint_name = 'synth_last_checkpoint.pt'
+    if os.path.isfile(os.path.join(folder, checkpoint_name)) and contunue:
+        checkpoint = torch.load(os.path.join(folder, checkpoint_name))
         epoch = checkpoint['epoch'] + 1
-        model.load_state_dict(checkpoint['model_state_dict'])
+        model.load_state_dict(checkpoint['model_state_dict'], strict=False)
         # return 0, model, optimizer, lr_scheduler, +math.inf
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        lr_scheduler.load_state_dict(checkpoint['lr_scheduler_state_dict'])
-        best_score = checkpoint['best_score']
+        #optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        #lr_scheduler.load_state_dict(checkpoint['lr_scheduler_state_dict'])
+        #best_score = checkpoint['best_score']
+        best_score = 100
         return epoch, model, optimizer, lr_scheduler, best_score
     else:
         return 0, model, optimizer, lr_scheduler, +math.inf
@@ -36,7 +38,7 @@ def restore_checkpoint(folder, contunue):
 def save_checkpoint(epoch, model, optimizer, lr_scheduler, best_score, folder, save_as_best):
     if not os.path.exists(folder):
         os.makedirs(folder)
-    if (epoch+1) % 100 == 0:
+    if (epoch+1) % 32 == 0:
         torch.save({
             'epoch': epoch,
             'model_state_dict': model.module.state_dict(),
@@ -123,13 +125,13 @@ def detection_loss(pred, gt):
         raw_loss[neg_mask == 0] = 0
         raw_loss = torch.from_numpy(raw_loss)
         num_neg = int(neg_mask.sum())
-        fill_ohem_mask(raw_loss, ohem_cls_mask[batch_id, 0], num_neg, 512, 512)
+        fill_ohem_mask(raw_loss, ohem_cls_mask[batch_id, 0], num_neg, 512*4, 512*4)
 
         raw_loss = raw_tensor_loss[batch_id].squeeze().data.cpu().numpy()
         raw_loss[shrunk_mask != 1] = 0
         raw_loss = torch.from_numpy(raw_loss)
         num_pos = int(shrunk_mask.sum())
-        fill_ohem_mask(raw_loss, ohem_reg_mask[batch_id, 0], num_pos, 128, 128)
+        fill_ohem_mask(raw_loss, ohem_reg_mask[batch_id, 0], num_pos, 128*4, 128*4)
 
     if 0:
         for batch_id in range(y_true_cls.shape[0]):
@@ -257,7 +259,7 @@ def fit(start_epoch, model, loss_func, opt, lr_scheduler, best_score, max_batche
                     ##angle /= angle.max()
                     ##left_dist = cv2.resize(left_dist, (0, 0), fx=4, fy=4, interpolation=cv2.INTER_AREA)
                     #cv2.imshow('angle', (angle * cls_bin / np.pi * 180).astype(np.uint8))
-                    #cv2.waitKey()
+                    cv2.waitKey()
 
             # show_tensors(cropped, classification, regression, thetas, training_mask, file_names)
 
@@ -308,7 +310,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     icdar = datasets.ICDAR2015(args.train_folder, datasets.transform)
-    #icdar = datasets.SynthText(args.train_folder, True, datasets.transform)
+    #icdar = datasets.SynthText(args.train_folder, datasets.transform)
     dl = torch.utils.data.DataLoader(icdar, batch_size=args.batch_size, shuffle=True,
                                      sampler=None, batch_sampler=None, num_workers=args.num_workers)
     checkoint_dir = 'runs'
