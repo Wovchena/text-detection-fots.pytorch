@@ -38,7 +38,7 @@ def restore_checkpoint(folder, contunue):
 def save_checkpoint(epoch, model, optimizer, lr_scheduler, best_score, folder, save_as_best):
     if not os.path.exists(folder):
         os.makedirs(folder)
-    if (epoch+1) % 32 == 0:
+    if (epoch+1) % 12 == 0:
         torch.save({
             'epoch': epoch,
             'model_state_dict': model.module.state_dict(),

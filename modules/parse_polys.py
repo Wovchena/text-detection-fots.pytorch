@@ -49,7 +49,8 @@ def parse_polys(cls, distances, angle, confidence_threshold=0.5, intersection_th
                 int((-(poly_x_center + poly_width / 2) * np.sin(poly_angle) + (poly_y_center + poly_height / 2) * np.cos(poly_angle)) * 2),
                 int(((poly_x_center - poly_width / 2) * np.cos(poly_angle) + (poly_y_center + poly_height / 2) * np.sin(poly_angle)) * 2),
                 int((-(poly_x_center - poly_width / 2) * np.sin(poly_angle) + (poly_y_center + poly_height / 2) * np.cos(poly_angle)) * 2),
-                cls[y, x]
+                cls[y, x],
+                1 # number of polys that affected this data
             ]
             #pts = np.array(poly[:8]).reshape((4, 2)).astype(np.int32)
             #cv2.line(thr_cls_copy, (pts[0, 0], pts[0, 1]), (pts[1, 0], pts[1, 1]), color=(0, 255, 0))

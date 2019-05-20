@@ -18,6 +18,7 @@ def intersection(g, p):
 def weighted_merge(g, p):
     g[:8] = (g[8] * g[:8] + p[8] * p[:8])/(g[8] + p[8])
     g[8] = (g[8] + p[8])
+    g[9] = (g[9] + p[9])  # accumulate the number of polygons contributed, to obtain mean confidence
     return g
 
 
@@ -55,7 +56,10 @@ def nms_locality(polys, thres=0.3):
 
     if len(S) == 0:
         return np.array([])
-    return standard_nms(np.array(S), thres)
+    else:
+        mean_conf_polys = np.array(S)
+        mean_conf_polys[:, 8] = mean_conf_polys[:, 8] / mean_conf_polys[:, 9]
+        return standard_nms(mean_conf_polys, thres)
 
 
 if __name__ == '__main__':
