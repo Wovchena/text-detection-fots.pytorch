@@ -28,3 +28,5 @@ ICDAR 2013|||86.96/87.32|
 It is expected that the provided for training folder contains unzipped `ch4_training_images` and `ch4_training_localization_transcription_gt` from [Task 4.4: End to End (2015 edition)](http://rrc.cvc.uab.es/?ch=4&com=downloads).
 # The repo's results
 The best result `"recall": 0.7746750120365913, "precision": 0.8085427135678392, "hmean": 0.7912466191295796` for ICDAR 2015 was reached at this commit https://github.com/Wovchena/FOTSBasedTextDetection/pull/1/commits/90db90cb915d7d611a7da4380b2cca3add6b9d8b with treshold 0.95 for classification. The pretrained model is here: https://drive.google.com/open?id=1xaVshLRrMEkb9LA46IJAZhlapQr3vyY2
+
+See attention branch for experiments with attention
