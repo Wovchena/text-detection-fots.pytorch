@@ -22,6 +22,7 @@ def parse_polys(cls, distances, angle, confidence_threshold=0.5, intersection_th
     #thr_cls = (thr_cls * 255).astype(np.uint8)
     #thr_cls = cv2.cvtColor(thr_cls, cv2.COLOR_GRAY2BGR)
 
+    IN_OUT_RATIO = 2
     for y in range(height):
         for x in range(width):
             if cls[y, x] < confidence_threshold:
@@ -38,17 +39,17 @@ def parse_polys(cls, distances, angle, confidence_threshold=0.5, intersection_th
             poly_angle = angle[y, x] - np.pi / 4
             x_rot = x * np.cos(-poly_angle) + y * np.sin(-poly_angle)
             y_rot = -x * np.sin(-poly_angle) + y * np.cos(-poly_angle)
-            poly_y_center = y_rot + (poly_height / 2 - distances[0, y, x])
-            poly_x_center = x_rot - (poly_width / 2 - distances[1, y, x])
+            poly_y_center = y_rot * IN_OUT_RATIO + (poly_height / 2 - distances[0, y, x])
+            poly_x_center = x_rot * IN_OUT_RATIO - (poly_width / 2 - distances[1, y, x])
             poly = [
-                int(((poly_x_center - poly_width / 2) * np.cos(poly_angle) + (poly_y_center - poly_height / 2) * np.sin(poly_angle)) * 4),
-                int((-(poly_x_center - poly_width / 2) * np.sin(poly_angle) + (poly_y_center - poly_height / 2) * np.cos(poly_angle)) * 4),
-                int(((poly_x_center + poly_width / 2) * np.cos(poly_angle) + (poly_y_center - poly_height / 2) * np.sin(poly_angle)) * 4),
-                int((-(poly_x_center + poly_width / 2) * np.sin(poly_angle) + (poly_y_center - poly_height / 2) * np.cos(poly_angle)) * 4),
-                int(((poly_x_center + poly_width / 2) * np.cos(poly_angle) + (poly_y_center + poly_height / 2) * np.sin(poly_angle)) * 4),
-                int((-(poly_x_center + poly_width / 2) * np.sin(poly_angle) + (poly_y_center + poly_height / 2) * np.cos(poly_angle)) * 4),
-                int(((poly_x_center - poly_width / 2) * np.cos(poly_angle) + (poly_y_center + poly_height / 2) * np.sin(poly_angle)) * 4),
-                int((-(poly_x_center - poly_width / 2) * np.sin(poly_angle) + (poly_y_center + poly_height / 2) * np.cos(poly_angle)) * 4),
+                int(((poly_x_center - poly_width / 2) * np.cos(poly_angle) + (poly_y_center - poly_height / 2) * np.sin(poly_angle))),
+                int((-(poly_x_center - poly_width / 2) * np.sin(poly_angle) + (poly_y_center - poly_height / 2) * np.cos(poly_angle))),
+                int(((poly_x_center + poly_width / 2) * np.cos(poly_angle) + (poly_y_center - poly_height / 2) * np.sin(poly_angle))),
+                int((-(poly_x_center + poly_width / 2) * np.sin(poly_angle) + (poly_y_center - poly_height / 2) * np.cos(poly_angle))),
+                int(((poly_x_center + poly_width / 2) * np.cos(poly_angle) + (poly_y_center + poly_height / 2) * np.sin(poly_angle))),
+                int((-(poly_x_center + poly_width / 2) * np.sin(poly_angle) + (poly_y_center + poly_height / 2) * np.cos(poly_angle))),
+                int(((poly_x_center - poly_width / 2) * np.cos(poly_angle) + (poly_y_center + poly_height / 2) * np.sin(poly_angle))),
+                int((-(poly_x_center - poly_width / 2) * np.sin(poly_angle) + (poly_y_center + poly_height / 2) * np.cos(poly_angle))),
                 cls[y, x]
             ]
             #pts = np.array(poly[:8]).reshape((4, 2)).astype(np.int32)

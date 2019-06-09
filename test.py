@@ -8,10 +8,12 @@ import torch
 from model import FOTSModel
 from modules.parse_polys import parse_polys
 import re
+import tqdm
 
 
 def test(net, images_folder, output_folder, scaled_height):
-    for image_name in os.listdir(images_folder):
+    pbar = tqdm.tqdm(os.listdir(images_folder), desc='Test', ncols=80)
+    for image_name in pbar:
         prefix = image_name[:image_name.rfind('.')]
         image = cv2.imread(os.path.join(images_folder, image_name), cv2.IMREAD_COLOR)
         # due to bad net arch sizes have to be mult of 32, so hardcode it
@@ -35,6 +37,7 @@ def test(net, images_folder, output_folder, scaled_height):
                     int(polys[id, 0] / scale_x), int(polys[id, 1] / scale_y), int(polys[id, 2] / scale_x), int(polys[id, 3] / scale_y),
                     int(polys[id, 4] / scale_x), int(polys[id, 5] / scale_y), int(polys[id, 6] / scale_x), int(polys[id, 7] / scale_y)
                 ))
+        pbar.set_postfix_str(image_name, refresh=False)
         # visualize
         # reshaped_pred_polys = []
         # for id in range(polys.shape[0]):
@@ -81,5 +84,5 @@ if __name__ == '__main__':
     checkpoint = torch.load(args.checkpoint)
     net.load_state_dict(checkpoint['model_state_dict'])
     net = net.eval().cuda()
-
-    test(net, args.images_folder, args.output_folder, args.height_size)
+    with torch.no_grad():
+        test(net, args.images_folder, args.output_folder, args.height_size)

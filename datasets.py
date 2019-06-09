@@ -13,9 +13,9 @@ from shapely.geometry import Polygon, box
 
 
 def point_dist_to_line(p1, p2, p3):
-    # compute the distance from p3 to p1-p2
+    """Compute the distance from p3 to p2-p1."""
     if not np.array_equal(p1, p2):
-        return np.linalg.norm(np.cross(p2 - p1, p1 - p3)) / np.linalg.norm(p2 - p1)
+        return np.abs(np.cross(p2 - p1, p1 - p3)) / np.linalg.norm(p2 - p1)
     else:
         return np.linalg.norm(p3 - p1)
 
@@ -57,28 +57,33 @@ def transform(im, quads, texts, normalizer, icdar):
     nH *= strechK
     nH = int(nH)
     # crop
-    quads /= 4
-    crop_point = (torch.randint(low=0, high=stretched.shape[1] // 4 - 160, size=(1,), dtype=torch.int16).item(),
-                  torch.randint(low=0, high=stretched.shape[0] // 4 - 160, size=(1,), dtype=torch.int16).item())
-    crop_box = box(crop_point[0], crop_point[1], crop_point[0] + 160, crop_point[1] + 160)
+    IN_OUT_RATIO = 2
+    IN_SIDE = 640
+    OUT_SIDE = IN_SIDE // IN_OUT_RATIO
 
-    training_mask = np.ones((160, 160), dtype=float)
-    classification = np.zeros((160, 160), dtype=float)
+    quads /= IN_OUT_RATIO
+
+    training_mask = np.ones((OUT_SIDE, OUT_SIDE), dtype=float)
+    classification = np.zeros((OUT_SIDE, OUT_SIDE), dtype=float)
     regression = np.zeros((4,) + classification.shape, dtype=float)
     tmp_cls = np.empty(classification.shape, dtype=float)
     thetas = np.zeros(classification.shape, dtype=float)
+
+    crop_point = (torch.randint(low=0, high=stretched.shape[1] // IN_OUT_RATIO - OUT_SIDE, size=(1,), dtype=torch.int16).item(),
+                  torch.randint(low=0, high=stretched.shape[0] // IN_OUT_RATIO - OUT_SIDE, size=(1,), dtype=torch.int16).item())
+    crop_box = box(crop_point[0], crop_point[1], crop_point[0] + OUT_SIDE, crop_point[1] + OUT_SIDE)
 
     for quad_id, quad in enumerate(quads):
         polygon = Polygon(quad)
         intersected_polygon = polygon.intersection(crop_box)
         if type(intersected_polygon) is Polygon:
-            minAreaRect = cv2.minAreaRect(quad.astype(np.float32))
-            shrinkage = min(minAreaRect[1][0], minAreaRect[1][1]) * 0.6
             intersected_quad = np.array(intersected_polygon.exterior.coords[:-1])
             intersected_quad -= crop_point
             intersected_minAreaRect = cv2.minAreaRect(intersected_quad.astype(np.float32))
             intersected_minAreaRect_boxPoints = cv2.boxPoints(intersected_minAreaRect)
             cv2.fillConvexPoly(training_mask, intersected_minAreaRect_boxPoints.round().astype(int), 0)
+            minAreaRect = cv2.minAreaRect(quad.astype(np.float32))
+            shrinkage = min(minAreaRect[1][0], minAreaRect[1][1]) * 0.6
             shrunk_width_and_height = (intersected_minAreaRect[1][0] - shrinkage, intersected_minAreaRect[1][1] - shrinkage)
             if shrunk_width_and_height[0] >= 0 and shrunk_width_and_height[1] >= 0 and texts[quad_id]:
                 shrunk_minAreaRect = intersected_minAreaRect[0], shrunk_width_and_height, intersected_minAreaRect[2]
@@ -99,8 +104,6 @@ def transform(im, quads, texts, normalizer, icdar):
                 round_shrink_minAreaRect_boxPoints = cv2.boxPoints(shrunk_minAreaRect)
                 cv2.fillConvexPoly(tmp_cls, round_shrink_minAreaRect_boxPoints.round(out=round_shrink_minAreaRect_boxPoints).astype(int), 1)
                 cv2.rectangle(tmp_cls, (0, 0), (tmp_cls.shape[1] - 1, tmp_cls.shape[0] - 1), 0, thickness=int(round(shrinkage * 2)))
-                if 0 == np.count_nonzero(tmp_cls) and 0.1 < torch.rand(1).item():
-                    return icdar[torch.randint(low=0, high=len(icdar), size=(1,), dtype=torch.int16).item()]
 
                 classification += tmp_cls
                 training_mask += tmp_cls
@@ -109,12 +112,13 @@ def transform(im, quads, texts, normalizer, icdar):
                 points = np.nonzero(tmp_cls)
                 pointsT = np.transpose(points)
                 for point in pointsT:
-                    for plane in range(3):  # TODO looks that it is really slow
-                        regression[(plane,) + tuple(point)] = point_dist_to_line(poly[plane], poly[plane + 1],
-                                                                                 np.array((point[1], point[0])))
-                    regression[(3,) + tuple(point)] = point_dist_to_line(poly[3], poly[0],
-                                                                         np.array((point[1], point[0])))
-    cropped = stretched[crop_point[1] * 4:crop_point[1] * 4 + 640, crop_point[0] * 4:crop_point[0] * 4 + 640]
+                    for plane in range(3):  # TODO widht - dist, height - other dist and more percise dist
+                        regression[(plane,) + tuple(point)] = point_dist_to_line(poly[plane], poly[plane + 1], np.array((point[1], point[0]))) * IN_OUT_RATIO
+                    regression[(3,) + tuple(point)] = point_dist_to_line(poly[3], poly[0], np.array((point[1], point[0]))) * IN_OUT_RATIO
+    if 0 == np.count_nonzero(classification) and 0.1 < torch.rand(1).item():
+        return icdar[torch.randint(low=0, high=len(icdar), size=(1,), dtype=torch.int16).item()]
+    # TODO do not train on black corners produced by rotation
+    cropped = stretched[crop_point[1] * IN_OUT_RATIO:crop_point[1] * IN_OUT_RATIO + IN_SIDE, crop_point[0] * IN_OUT_RATIO:crop_point[0] * IN_OUT_RATIO + IN_SIDE]
     cropped = cv2.cvtColor(cropped, cv2.COLOR_BGR2RGB).astype(np.float64) / 255
     permuted = np.transpose(cropped, (2, 0, 1))
     permuted = torch.from_numpy(permuted).float()
@@ -188,20 +192,21 @@ if '__main__' == __name__:
         normalized, classification, regression, thetas, training_mask = icdar[image_i]
         permuted = normalized * torch.tensor([0.229, 0.224, 0.225])[:, None, None] + torch.tensor([0.485, 0.456, 0.406])[:, None, None]
         cropped = permuted.permute(1, 2, 0).numpy()
-        cv2.imshow('orig', cropped[:, :, ::-1])
+        cv2.imshow('orig', cv2.resize(cropped[:, :, ::-1], (640, 640)))
         cropped = cv2.resize(cropped, (160, 160))
-        cv2.imshow('img', cropped[:, :, ::-1] * training_mask.numpy()[:, :, None])
-        cv2.imshow('training_mask', training_mask.numpy() * 255)
-        cv2.imshow('classification', classification.numpy() * 255)
-        cv2.waitKey(0)
+        cv2.imshow('img', cv2.resize(cropped[:, :, ::-1] * training_mask.numpy()[:, :, None], (640, 640)))
+        cv2.imshow('training_mask', cv2.resize(training_mask.numpy() * 255, (640, 640)))
+        cv2.imshow('classification', cv2.resize(classification.numpy() * 255, (640, 640)))
         regression = regression.numpy()
         for i in range(4):
             m = np.amax(regression[i])
-            cv2.imshow('', regression[i, :, :] / m)
-            cv2.waitKey(0)
+            if 0 != m:
+                cv2.imshow(str(i), cv2.resize(regression[i, :, :] / m, (640, 640)))
+            else:
+                cv2.imshow(str(i), cv2.resize(regression[i, :, :], (640, 640)))
         thetas = thetas.numpy()
         minim = np.amin(thetas)
         m = np.amax(thetas)
         print(m * 180 / np.pi)
-        cv2.imshow('', np.array(np.around(thetas * 255 / m * 180 / np.pi), dtype=np.uint8))
+        cv2.imshow('angle', cv2.resize(np.array(np.around(thetas * 255 / m * 180 / np.pi), dtype=np.uint8), (640, 640)))
         cv2.waitKey(0)

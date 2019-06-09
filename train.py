@@ -17,14 +17,14 @@ from modules.parse_polys import parse_polys
 def restore_checkpoint(folder, contunue):
     model = FOTSModel().to(torch.device("cuda"))
     optimizer = torch.optim.Adam(model.parameters(), lr=0.005, weight_decay=1e-5)
-    lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=25, verbose=True, threshold=0.0001, threshold_mode='rel')
+    lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=10, verbose=True, threshold=0.0001, threshold_mode='rel')
     #lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[3, 8, 14])
 
-    if os.path.isfile(os.path.join(folder, 'last_checkpoint.pt')) and contunue:
-        checkpoint = torch.load(os.path.join(folder, 'last_checkpoint.pt'))
-        epoch = checkpoint['epoch'] + 1
+    checkppoint_name = os.path.join(folder, 'last_checkpoint.pt')
+    if os.path.isfile(checkppoint_name) and contunue:
+        checkpoint = torch.load(checkppoint_name)
         model.load_state_dict(checkpoint['model_state_dict'])
-        # return 0, model, optimizer, lr_scheduler, +math.inf
+        epoch = checkpoint['epoch'] + 1
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         lr_scheduler.load_state_dict(checkpoint['lr_scheduler_state_dict'])
         best_score = checkpoint['best_score']
@@ -36,7 +36,7 @@ def restore_checkpoint(folder, contunue):
 def save_checkpoint(epoch, model, optimizer, lr_scheduler, best_score, folder, save_as_best):
     if not os.path.exists(folder):
         os.makedirs(folder)
-    if (epoch+1) % 100 == 0:
+    if (epoch+1) % 12 == 0:
         torch.save({
             'epoch': epoch,
             'model_state_dict': model.module.state_dict(),
@@ -270,7 +270,7 @@ def fit(start_epoch, model, loss_func, opt, lr_scheduler, best_score, max_batche
             if batch_per_iter_cnt == max_batches_per_iter_cnt:
                 opt.step()
                 batch_per_iter_cnt = 0
-                pbar.set_postfix({'Mean loss': train_loss_stats / loss_count_stats}, refresh=False)
+                pbar.set_postfix({'Mean loss': f'{train_loss_stats / loss_count_stats:.3f}'}, refresh=False)
         lr_scheduler.step(train_loss_stats / loss_count_stats, epoch)
         #lr_scheduler.step()
 
