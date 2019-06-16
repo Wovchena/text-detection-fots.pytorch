@@ -82,6 +82,7 @@ if __name__ == '__main__':
 
     net = FOTSModel()
     checkpoint = torch.load(args.checkpoint)
+    print('Epoch ', checkpoint['epoch'])
     net.load_state_dict(checkpoint['model_state_dict'])
     net = net.eval().cuda()
     with torch.no_grad():

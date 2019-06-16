@@ -117,7 +117,8 @@ def transform(im, quads, texts, normalizer, icdar):
                     regression[(3,) + tuple(point)] = point_dist_to_line(poly[3], poly[0], np.array((point[1], point[0]))) * IN_OUT_RATIO
     if 0 == np.count_nonzero(classification) and 0.1 < torch.rand(1).item():
         return icdar[torch.randint(low=0, high=len(icdar), size=(1,), dtype=torch.int16).item()]
-    # TODO do not train on black corners produced by rotation
+    # avoiding training on black corners decreases hmean, see d9c727a8defbd1c8022478ae798c907ccd2fa0b2
+
     cropped = stretched[crop_point[1] * IN_OUT_RATIO:crop_point[1] * IN_OUT_RATIO + IN_SIDE, crop_point[0] * IN_OUT_RATIO:crop_point[0] * IN_OUT_RATIO + IN_SIDE]
     cropped = cv2.cvtColor(cropped, cv2.COLOR_BGR2RGB).astype(np.float64) / 255
     permuted = np.transpose(cropped, (2, 0, 1))
