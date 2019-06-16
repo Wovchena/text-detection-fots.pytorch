@@ -20,11 +20,10 @@ def restore_checkpoint(folder, contunue):
     lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=10, verbose=True, threshold=0.0001, threshold_mode='rel')
     #lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[3, 8, 14])
 
-    checkppoint_name = os.path.join(folder, 'synth_last_checkpoint.pt')
+    checkppoint_name = os.path.join(folder, 'last_checkpoint.pt')
     if os.path.isfile(checkppoint_name) and contunue:
         checkpoint = torch.load(checkppoint_name)
         model.load_state_dict(checkpoint['model_state_dict'])
-        return 0, model, optimizer, lr_scheduler, +math.inf
         epoch = checkpoint['epoch'] + 1
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         lr_scheduler.load_state_dict(checkpoint['lr_scheduler_state_dict'])
@@ -111,7 +110,7 @@ def detection_loss(pred, gt):
     for batch_id in range(y_true_cls.shape[0]):
         y_true = y_true_cls[batch_id].squeeze().data.cpu().numpy().astype(np.uint8)
         mask = training_mask[batch_id].squeeze().data.cpu().numpy().astype(np.uint8)
-        shrunk_mask = y_true & mask  # TODO it is not required any more
+        shrunk_mask = y_true & mask
         neg_mask = y_true.copy()
         neg_mask[y_true == 1] = 0
         neg_mask[y_true == 0] = 1
