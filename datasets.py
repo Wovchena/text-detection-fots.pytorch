@@ -10,6 +10,7 @@ import torch
 import torch.utils.data
 import torchvision
 from shapely.geometry import Polygon, box
+import shapely
 
 
 def point_dist_to_line(p1, p2, p3):
@@ -19,8 +20,33 @@ def point_dist_to_line(p1, p2, p3):
     else:
         return np.linalg.norm(p3 - p1)
 
+def has_selfintersection(quad):
+    bottom_right_l1 = quad[:2].max(axis=0)
+    upper_left_l1 = quad[:2].min(axis=0)
+    bottom_right_l2 = quad[2:].max(axis=0)
+    upper_left_l2 = quad[2:].min(axis=0)
+    if bottom_right_l1[0] < upper_left_l2[0] or bottom_right_l1[1] < upper_left_l2[1]\
+            or bottom_right_l2[0] < upper_left_l1[0] or bottom_right_l2[1] < upper_left_l1[1]:
+        return False
 
-def transform(im, quads, texts, normalizer, icdar):
+    h = np.hstack((quad, np.ones((4, 1)))) # h for homogeneous
+    l1 = np.cross(h[0], h[1])           # get first line
+    l2 = np.cross(h[2], h[3])           # get second line
+    x, y, z = np.cross(l1, l2)          # point of intersection
+    if z == 0:                          # lines are parallel
+        return False
+    x = x/z
+    y = y/z
+    return max(upper_left_l1[0], upper_left_l2[0]) <= x <= min(bottom_right_l1[0], bottom_right_l2[0])\
+        and max(upper_left_l1[1], upper_left_l2[1]) <= y <= min(bottom_right_l1[1], bottom_right_l2[1])
+
+
+IN_OUT_RATIO = 4
+IN_SIDE = 640
+OUT_SIDE = IN_SIDE // IN_OUT_RATIO
+
+
+def transform(im, quads, texts, normalizer, data_set):
     # upscale
     scale = 2560 / np.maximum(im.shape[0], im.shape[1])
     upscaled = cv2.resize(im, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
@@ -54,12 +80,6 @@ def transform(im, quads, texts, normalizer, icdar):
     strechK = torch.empty(1).uniform_(0.8, 1.2).item()
     stretched = cv2.resize(rotated, None, fx=1, fy=strechK, interpolation=cv2.INTER_CUBIC)
     quads[:, :, 1] = quads[:, :, 1] * strechK
-    nH *= strechK
-    nH = int(nH)
-    # crop
-    IN_OUT_RATIO = 2
-    IN_SIDE = 640
-    OUT_SIDE = IN_SIDE // IN_OUT_RATIO
 
     quads /= IN_OUT_RATIO
 
@@ -69,13 +89,24 @@ def transform(im, quads, texts, normalizer, icdar):
     tmp_cls = np.empty(classification.shape, dtype=float)
     thetas = np.zeros(classification.shape, dtype=float)
 
-    crop_point = (torch.randint(low=0, high=stretched.shape[1] // IN_OUT_RATIO - OUT_SIDE, size=(1,), dtype=torch.int16).item(),
-                  torch.randint(low=0, high=stretched.shape[0] // IN_OUT_RATIO - OUT_SIDE, size=(1,), dtype=torch.int16).item())
+    # crop
+    crop_max_y = stretched.shape[0] // IN_OUT_RATIO - OUT_SIDE  # since Synth has some low images, there is a chance that y coord of crop can be zero only
+    if 0 != crop_max_y:
+        crop_point = (torch.randint(low=0, high=stretched.shape[1] // IN_OUT_RATIO - OUT_SIDE, size=(1,), dtype=torch.int16).item(),
+                      torch.randint(low=0, high=stretched.shape[0] // IN_OUT_RATIO - OUT_SIDE, size=(1,), dtype=torch.int16).item())
+    else:
+        crop_point = (torch.randint(low=0, high=stretched.shape[1] // IN_OUT_RATIO - OUT_SIDE, size=(1,), dtype=torch.int16).item(),
+                      0)
     crop_box = box(crop_point[0], crop_point[1], crop_point[0] + OUT_SIDE, crop_point[1] + OUT_SIDE)
 
     for quad_id, quad in enumerate(quads):
         polygon = Polygon(quad)
-        intersected_polygon = polygon.intersection(crop_box)
+        try:
+            intersected_polygon = polygon.intersection(crop_box)
+        except shapely.errors.TopologicalError:  # some points of quads in Synth can be in wrong order
+            quad[1], quad[2] = quad[2], quad[1]
+            polygon = Polygon(quad)
+            intersected_polygon = polygon.intersection(crop_box)
         if type(intersected_polygon) is Polygon:
             intersected_quad = np.array(intersected_polygon.exterior.coords[:-1])
             intersected_quad -= crop_point
@@ -116,9 +147,8 @@ def transform(im, quads, texts, normalizer, icdar):
                         regression[(plane,) + tuple(point)] = point_dist_to_line(poly[plane], poly[plane + 1], np.array((point[1], point[0]))) * IN_OUT_RATIO
                     regression[(3,) + tuple(point)] = point_dist_to_line(poly[3], poly[0], np.array((point[1], point[0]))) * IN_OUT_RATIO
     if 0 == np.count_nonzero(classification) and 0.1 < torch.rand(1).item():
-        return icdar[torch.randint(low=0, high=len(icdar), size=(1,), dtype=torch.int16).item()]
+        return data_set[torch.randint(low=0, high=len(data_set), size=(1,), dtype=torch.int16).item()]
     # avoiding training on black corners decreases hmean, see d9c727a8defbd1c8022478ae798c907ccd2fa0b2
-
     cropped = stretched[crop_point[1] * IN_OUT_RATIO:crop_point[1] * IN_OUT_RATIO + IN_SIDE, crop_point[0] * IN_OUT_RATIO:crop_point[0] * IN_OUT_RATIO + IN_SIDE]
     cropped = cv2.cvtColor(cropped, cv2.COLOR_BGR2RGB).astype(np.float64) / 255
     permuted = np.transpose(cropped, (2, 0, 1))
@@ -163,6 +193,7 @@ class SynthText(torch.utils.data.Dataset):
         self.transform = transform
         self.root = root
         self.labels = scipy.io.loadmat(os.path.join(root, 'gt.mat'))
+        self.broken_image_ids = set()
         #sample_path = labels['imnames'][0, 1][0]
         #sample_boxes = np.transpose(labels['wordBB'][0, 1], (2, 1, 0))
         self.pattern = re.compile('^' + '(\\d+),' * 8 + '(.+)$')
@@ -170,20 +201,30 @@ class SynthText(torch.utils.data.Dataset):
                                                            std=[0.229, 0.224, 0.225])
 
     def __len__(self):
-        return self.labels['imnames'].shape[1] // 20
+        return self.labels['imnames'].shape[1] // 105  # there are more than 105 text images for each source image
 
     def __getitem__(self, idx):
-        idx = (idx * 20) + random.randint(0, 19)  # compensate dataset size, while maintain diversity
+        idx = (idx * 105) + random.randint(0, 104)  # compensate dataset size, while maintain diversity
+        if idx in self.broken_image_ids:
+            return self[torch.randint(low=0, high=len(self), size=(1,), dtype=torch.int16).item()]
         img = cv2.imread(os.path.join(self.root, self.labels['imnames'][0, idx][0]), cv2.IMREAD_COLOR).astype(np.float32)
-        quads = []
-        texts = []
+        if 180 >= img.shape[0]:  # image is too low, it will not be possible to crop 640x640 after transformations
+            self.broken_image_ids.add(idx)
+            return self[torch.randint(low=0, high=len(self), size=(1,), dtype=torch.int16).item()]
         coordinates = self.labels['wordBB'][0, idx]
         if len(coordinates.shape) == 2:
             coordinates = np.expand_dims(coordinates, axis=2)
-        quads.extend(np.transpose(coordinates, (2, 1, 0)))
-        texts.extend([True] * len(quads))
-
-        return transform(img, np.stack(quads), texts, self.normalizer, self)
+        transposed = np.transpose(coordinates, (2, 1, 0))
+        if (transposed > 0).all() and (transposed[:, :, 1] < img.shape[1]).all() and (transposed[:, :, 1] < img.shape[0]).all():
+            if ((transposed[:, 0] != transposed[:, 1]).all() and
+                (transposed[:, 0] != transposed[:, 2]).all() and
+                (transposed[:, 0] != transposed[:, 3]).all() and
+                (transposed[:, 1] != transposed[:, 2]).all() and
+                (transposed[:, 1] != transposed[:, 3]).all() and
+                (transposed[:, 2] != transposed[:, 3]).all()):  # boxes can be in a form [p1, p1, p2, p2], while we need [p1, p2, p3, p4]
+                    return transform(img, transposed, (True, ) * len(transposed), self.normalizer, self)
+        self.broken_image_ids.add(idx)
+        return self[torch.randint(low=0, high=len(self), size=(1,), dtype=torch.int16).item()]
 
 
 if '__main__' == __name__:

@@ -22,7 +22,7 @@ def parse_polys(cls, distances, angle, confidence_threshold=0.5, intersection_th
     #thr_cls = (thr_cls * 255).astype(np.uint8)
     #thr_cls = cv2.cvtColor(thr_cls, cv2.COLOR_GRAY2BGR)
 
-    IN_OUT_RATIO = 2
+    IN_OUT_RATIO = 4
     for y in range(height):
         for x in range(width):
             if cls[y, x] < confidence_threshold:
