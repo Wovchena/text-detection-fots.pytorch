@@ -170,6 +170,29 @@ class ICDAR2015(torch.utils.data.Dataset):
         return transform(img, np.stack(quads), texts, self.normalizer, self)
 
 
+class Icdar15_test(torch.utils.data.Dataset):
+    """Subtracts 1 from file name number so we could count from zero"""
+    def __init__(self, test_images_dir, out_width):
+        assert 0 == out_width % 32
+        # for some reason PyTorch does not allow os.DirEntry storing
+        self.test_entries = tuple((file.path, int(file.name[4:-4]) - 1) for file in os.scandir(test_images_dir)
+                                  if file.name.startswith('img_') and file.name.endswith('.jpg'))
+        self.out_width = out_width
+        self.normalizer = torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                                           std=[0.229, 0.224, 0.225])
+
+    def __len__(self):
+        return len(self.test_entries)
+
+    def __getitem__(self, idx):
+        source_img = cv2.imread(self.test_entries[idx][0], cv2.IMREAD_COLOR)
+        upscaled = cv2.resize(source_img[:, :, ::-1].astype(np.float64),
+            (self.out_width, round(self.out_width * source_img.shape[0] / source_img.shape[1] / 32) * 32),
+            interpolation=cv2.INTER_CUBIC) / 255
+        return self.normalizer(torch.from_numpy(upscaled.transpose(2, 0, 1).astype(np.float32))),\
+               self.test_entries[idx][1]
+
+
 class SynthText(torch.utils.data.Dataset):
     def __init__(self, root, transform):
         self.transform = transform
