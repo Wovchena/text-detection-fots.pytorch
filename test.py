@@ -69,10 +69,12 @@ if __name__ == '__main__':
     parser.add_argument('--output-folder', type=pathlib.Path, help='path to the output folder with result labels')
     args = parser.parse_args()
 
-    conf_thresholds = []
-    iou_thresholds = []
-    hmeans = []
+    # if there is log file, visualize it.
+    # After that independently on presence of thresholds.csv collect new data and append to thresholds.csv
     if os.path.isfile('thresholds.csv'):
+        conf_thresholds = []
+        iou_thresholds = []
+        hmeans = []
         with open('thresholds.csv', 'r') as thresholds_csv:
             for line in thresholds_csv:
                 values = line.split(',')
@@ -91,9 +93,6 @@ if __name__ == '__main__':
         ax.set_ylabel('IoU')
         plt.show()
         plt.close(fig)
-    else:
-        with open('thresholds.csv', 'w'):
-            pass
 
     if args.output_folder and not os.path.exists(args.output_folder):
         os.makedirs(args.output_folder)
@@ -120,8 +119,8 @@ if __name__ == '__main__':
     tensors = infer(net, dl)
 
     # random search for the best conf_threshold and iou_threshold.
-    # the best known: conf_threshold, iou_threshold = 0.5074167540548656, 0.2333475569801364
-    # giving hmean=0.8023314749113026
+    # the best known: conf_threshold, iou_threshold = 0.9576973814502354,0.31730115040374385
+    # giving hmean=0.8017307202850599
     while True:
         conf_threshold = random.uniform(0.5, 0.999)
         iou_threshold = random.uniform(0.1, 0.5)
@@ -158,19 +157,5 @@ if __name__ == '__main__':
         metrics_values = script.evaluate_method(gt_dict, predictions_dict, evaluationParams)
         print(conf_threshold, iou_threshold, metrics_values['method'])
 
-        with open('thresholds.csv', 'a') as thresholds_csv:
+        with open('thresholds.csv', 'a+') as thresholds_csv:
             thresholds_csv.write(f"{conf_threshold},{iou_threshold},{metrics_values['method']['hmean']}\n")
-        conf_thresholds.append(conf_threshold)
-        iou_thresholds.append(iou_threshold)
-        hmeans.append(metrics_values['method']['hmean'])
-
-        fig = plt.figure()
-        ax = fig.add_subplot(111, projection='3d')
-        cmap = matplotlib.cm.get_cmap('rainbow')
-        normalize = matplotlib.colors.Normalize(vmin=min(hmeans), vmax=max(hmeans))
-        colors = [cmap(normalize(value)) for value in hmeans]
-        ax.scatter(conf_thresholds, iou_thresholds, zs=hmeans, s=5, c=colors, depthshade=False)
-        ax.set_xlabel('conf')
-        ax.set_ylabel('IoU')
-        plt.savefig('thresholds.png')
-        plt.close(fig)
