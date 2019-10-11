@@ -77,7 +77,7 @@ class FOTSModel(nn.Module):
 
         confidence = self.confidence(final)
         distances = self.distances(final)
-        distances = torch.sigmoid(distances) * (self.crop_height / 4)
+        distances = torch.sigmoid(distances) * self.crop_height
         angle = self.angle(final)
         angle = torch.sigmoid(angle) * np.pi / 2
 

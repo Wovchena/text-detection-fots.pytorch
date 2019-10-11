@@ -20,26 +20,6 @@ def point_dist_to_line(p1, p2, p3):
     else:
         return np.linalg.norm(p3 - p1)
 
-def has_selfintersection(quad):
-    bottom_right_l1 = quad[:2].max(axis=0)
-    upper_left_l1 = quad[:2].min(axis=0)
-    bottom_right_l2 = quad[2:].max(axis=0)
-    upper_left_l2 = quad[2:].min(axis=0)
-    if bottom_right_l1[0] < upper_left_l2[0] or bottom_right_l1[1] < upper_left_l2[1]\
-            or bottom_right_l2[0] < upper_left_l1[0] or bottom_right_l2[1] < upper_left_l1[1]:
-        return False
-
-    h = np.hstack((quad, np.ones((4, 1)))) # h for homogeneous
-    l1 = np.cross(h[0], h[1])           # get first line
-    l2 = np.cross(h[2], h[3])           # get second line
-    x, y, z = np.cross(l1, l2)          # point of intersection
-    if z == 0:                          # lines are parallel
-        return False
-    x = x/z
-    y = y/z
-    return max(upper_left_l1[0], upper_left_l2[0]) <= x <= min(bottom_right_l1[0], bottom_right_l2[0])\
-        and max(upper_left_l1[1], upper_left_l2[1]) <= y <= min(bottom_right_l1[1], bottom_right_l2[1])
-
 
 IN_OUT_RATIO = 4
 IN_SIDE = 640
@@ -148,7 +128,9 @@ def transform(im, quads, texts, normalizer, data_set):
                     regression[(3,) + tuple(point)] = point_dist_to_line(poly[3], poly[0], np.array((point[1], point[0]))) * IN_OUT_RATIO
     if 0 == np.count_nonzero(classification) and 0.1 < torch.rand(1).item():
         return data_set[torch.randint(low=0, high=len(data_set), size=(1,), dtype=torch.int16).item()]
-    # avoiding training on black corners decreases hmean, see d9c727a8defbd1c8022478ae798c907ccd2fa0b2
+    # avoiding training on black corners decreases hmean, see d9c727a8defbd1c8022478ae798c907ccd2fa0b2. This may happen
+    # because of OHEM: it already guides the training and it won't select back corner pixels if the net is good at
+    # classifying them. It can be easily verified by removing OHEM, but I didn't test it
     cropped = stretched[crop_point[1] * IN_OUT_RATIO:crop_point[1] * IN_OUT_RATIO + IN_SIDE, crop_point[0] * IN_OUT_RATIO:crop_point[0] * IN_OUT_RATIO + IN_SIDE]
     cropped = cv2.cvtColor(cropped, cv2.COLOR_BGR2RGB).astype(np.float64) / 255
     permuted = np.transpose(cropped, (2, 0, 1))
@@ -189,7 +171,7 @@ class ICDAR2015(torch.utils.data.Dataset):
 
 
 class SynthText(torch.utils.data.Dataset):
-    def __init__(self, root, train, transform):
+    def __init__(self, root, transform):
         self.transform = transform
         self.root = root
         self.labels = scipy.io.loadmat(os.path.join(root, 'gt.mat'))
@@ -208,7 +190,7 @@ class SynthText(torch.utils.data.Dataset):
         if idx in self.broken_image_ids:
             return self[torch.randint(low=0, high=len(self), size=(1,), dtype=torch.int16).item()]
         img = cv2.imread(os.path.join(self.root, self.labels['imnames'][0, idx][0]), cv2.IMREAD_COLOR).astype(np.float32)
-        if 180 >= img.shape[0]:  # image is too low, it will not be possible to crop 640x640 after transformations
+        if 190 >= img.shape[0]:  # image is too low, it will not be possible to crop 640x640 after transformations
             self.broken_image_ids.add(idx)
             return self[torch.randint(low=0, high=len(self), size=(1,), dtype=torch.int16).item()]
         coordinates = self.labels['wordBB'][0, idx]

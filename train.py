@@ -17,10 +17,10 @@ from modules.parse_polys import parse_polys
 def restore_checkpoint(folder, contunue):
     model = FOTSModel().to(torch.device("cuda"))
     optimizer = torch.optim.Adam(model.parameters(), lr=0.005, weight_decay=1e-5)
-    lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=10, verbose=True, threshold=0.0001, threshold_mode='rel')
+    lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=32, verbose=True, threshold=0.05, threshold_mode='rel')
     # lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[25])
 
-    checkppoint_name = os.path.join(folder, 'synth_52.pt')
+    checkppoint_name = os.path.join(folder, 'last_checkpoint.pt')
     if os.path.isfile(checkppoint_name) and contunue:
         checkpoint = torch.load(checkppoint_name)
         model.load_state_dict(checkpoint['model_state_dict'])
@@ -37,7 +37,7 @@ def restore_checkpoint(folder, contunue):
 def save_checkpoint(epoch, model, optimizer, lr_scheduler, best_score, folder, save_as_best):
     if not os.path.exists(folder):
         os.makedirs(folder)
-    if (epoch+1) % 12 == 0:
+    if epoch > 30 and (epoch+1) % 8 == 0:
         torch.save({
             'epoch': epoch,
             'model_state_dict': model.module.state_dict(),
@@ -308,7 +308,9 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     icdar = datasets.ICDAR2015(args.train_folder, datasets.transform)
-    # icdar = datasets.SynthText(args.train_folder, True, datasets.transform)
+    # synth = datasets.SynthText(args.train_folder, True, datasets.transform)
+    # concat_dataset = torch.utils.data.ConcatDataset((synth, icdar))
+
     dl = torch.utils.data.DataLoader(icdar, batch_size=args.batch_size, shuffle=True,
                                      sampler=None, batch_sampler=None, num_workers=args.num_workers)
     checkoint_dir = 'runs'
