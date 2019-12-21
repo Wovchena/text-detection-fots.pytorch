@@ -16,15 +16,14 @@ from modules.parse_polys import parse_polys
 
 def restore_checkpoint(folder, contunue):
     model = FOTSModel().to(torch.device("cuda"))
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.005, weight_decay=1e-5)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-5)
     lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=32, verbose=True, threshold=0.05, threshold_mode='rel')
-    # lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[25])
 
     checkppoint_name = os.path.join(folder, 'last_checkpoint.pt')
     if os.path.isfile(checkppoint_name) and contunue:
         checkpoint = torch.load(checkppoint_name)
         model.load_state_dict(checkpoint['model_state_dict'])
-        return 0, model, optimizer, lr_scheduler, +math.inf
+        # return 0, model, optimizer, lr_scheduler, +math.inf
         epoch = checkpoint['epoch'] + 1
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         lr_scheduler.load_state_dict(checkpoint['lr_scheduler_state_dict'])
@@ -37,14 +36,15 @@ def restore_checkpoint(folder, contunue):
 def save_checkpoint(epoch, model, optimizer, lr_scheduler, best_score, folder, save_as_best):
     if not os.path.exists(folder):
         os.makedirs(folder)
-    if epoch > 30 and (epoch+1) % 8 == 0:
+    # if epoch > 60 and epoch % 6 == 0:
+    if True:
         torch.save({
             'epoch': epoch,
             'model_state_dict': model.module.state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
             'lr_scheduler_state_dict': lr_scheduler.state_dict(),
             'best_score': best_score  # not current score
-        }, os.path.join(folder, 'epoch_{}_checkpoint.pt'.format(epoch+1)))
+        }, os.path.join(folder, 'epoch_{}_checkpoint.pt'.format(epoch)))
 
     if save_as_best:
         torch.save({
@@ -198,7 +198,7 @@ def show_tensors(cropped, classification, regression, thetas, training_mask, fil
 
 def fit(start_epoch, model, loss_func, opt, lr_scheduler, best_score, max_batches_per_iter_cnt, checkpoint_dir, train_dl, valid_dl):
     batch_per_iter_cnt = 0
-    for epoch in range(start_epoch, 9999999):
+    for epoch in range(start_epoch, 999):
         model.train()
         train_loss_stats = 0.0
         loss_count_stats = 0
@@ -307,9 +307,9 @@ if __name__ == '__main__':
     parser.add_argument('--continue-training', action='store_true', help='continue training')
     args = parser.parse_args()
 
-    icdar = datasets.ICDAR2015(args.train_folder, datasets.transform)
-    # synth = datasets.SynthText(args.train_folder, True, datasets.transform)
-    # concat_dataset = torch.utils.data.ConcatDataset((synth, icdar))
+    synth = datasets.SynthText(args.train_folder, datasets.transform)
+    # icdar = datasets.ICDAR2015(args.train_folder, datasets.transform)
+    # concat_dataset = torch.utils.data.ConcatDataset((synth, icdar))  # the paper doesn't do that so me neither
 
     dl = torch.utils.data.DataLoader(icdar, batch_size=args.batch_size, shuffle=True,
                                      sampler=None, batch_sampler=None, num_workers=args.num_workers)
