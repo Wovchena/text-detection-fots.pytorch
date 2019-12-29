@@ -82,3 +82,49 @@ class FOTSModel(nn.Module):
         angle = torch.sigmoid(angle) * np.pi / 2
 
         return confidence, distances, angle
+
+
+# class FOTSModel(nn.Module):
+#     """This model is described in the paper, but it trains slower and gives slightly worse results"""
+#     def __init__(self, crop_height=640):
+#         super().__init__()
+#         self.crop_height = crop_height
+#         self.resnet = torchvision.models.resnet50(pretrained=True)
+#         self.conv1 = nn.Sequential(
+#             self.resnet.conv1,
+#             self.resnet.bn1,
+#             self.resnet.relu,
+#         )  # 64 * 4
+#         self.encoder1 = self.resnet.layer1  # 64 * 4
+#         self.encoder2 = self.resnet.layer2  # 128 * 4
+#         self.encoder3 = self.resnet.layer3  # 256 * 4
+#         self.encoder4 = self.resnet.layer4  # 512 * 4
+
+#         self.decoder3 = Decoder(512 * 4, 256 * 4)
+#         self.decoder2 = Decoder(256 * 4 * 2, 128 * 4)
+#         self.decoder1 = Decoder(128 * 4 * 2, 64 * 4)
+
+#         self.confidence = conv(64 * 4 * 2, 1, kernel_size=1, padding=0, bn=False, relu=False)
+#         self.distances = conv(64 * 4 * 2, 4, kernel_size=1, padding=0, bn=False, relu=False)
+#         self.angle = conv(64 * 4 * 2, 1, kernel_size=1, padding=0, bn=False, relu=False)
+
+#     def forward(self, x):
+#         x = self.conv1(x)
+#         x = F.max_pool2d(x, kernel_size=2, stride=2)
+
+#         e1 = self.encoder1(x)
+#         e2 = self.encoder2(e1)
+#         e3 = self.encoder3(e2)
+#         e4 = self.encoder4(e3)
+
+#         d3 = self.decoder3(e4, e3)
+#         d2 = self.decoder2(d3, e2)
+#         d1 = self.decoder1(d2, e1)
+
+#         confidence = self.confidence(d1)
+#         distances = self.distances(d1)
+#         distances = torch.sigmoid(distances) * self.crop_height
+#         angle = self.angle(d1)
+#         angle = torch.sigmoid(angle) * np.pi / 2
+
+#         return confidence, distances, angle

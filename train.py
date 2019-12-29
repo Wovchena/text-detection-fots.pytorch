@@ -19,7 +19,7 @@ def restore_checkpoint(folder, contunue):
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-5)
     lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=32, verbose=True, threshold=0.05, threshold_mode='rel')
 
-    checkppoint_name = os.path.join(folder, 'last_checkpoint.pt')
+    checkppoint_name = os.path.join(folder, 'epoch_8_checkpoint.pt')
     if os.path.isfile(checkppoint_name) and contunue:
         checkpoint = torch.load(checkppoint_name)
         model.load_state_dict(checkpoint['model_state_dict'])
@@ -265,15 +265,15 @@ def fit(start_epoch, model, loss_func, opt, lr_scheduler, best_score, max_batche
 
             loss = loss_func(prediction, (classification, regression, thetas, training_mask)) / max_batches_per_iter_cnt
             train_loss_stats += loss.item()
-            loss_count_stats += 1
             loss.backward()
             batch_per_iter_cnt += 1
             if batch_per_iter_cnt == max_batches_per_iter_cnt:
                 opt.step()
                 batch_per_iter_cnt = 0
-                pbar.set_postfix({'Mean loss': f'{train_loss_stats / loss_count_stats:.5f}'}, refresh=False)
-        lr_scheduler.step(train_loss_stats / loss_count_stats, epoch)
-        # lr_scheduler.step()
+                loss_count_stats += 1
+                mean_loss = train_loss_stats / loss_count_stats
+                pbar.set_postfix({'Mean loss': f'{mean_loss:.5f}'}, refresh=False)
+        lr_scheduler.step(mean_loss, epoch)
 
         if valid_dl is None:
             val_loss = train_loss_stats / loss_count_stats
@@ -301,17 +301,20 @@ def fit(start_epoch, model, loss_func, opt, lr_scheduler, best_score, max_batche
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--train-folder', type=str, required=True, help='Path to folder with train images and labels')
-    parser.add_argument('--batch-size', type=int, default=8, help='Number of batches to process before train step')
-    parser.add_argument('--batches-before-train', type=int, default=4, help='Number of batches to process before train step')
+    parser.add_argument('--batch-size', type=int, default=21, help='Number of batches to process before train step')
+    parser.add_argument('--batches-before-train', type=int, default=2, help='Number of batches to process before train step')
     parser.add_argument('--num-workers', type=int, default=8, help='Path to folder with train images and labels')
     parser.add_argument('--continue-training', action='store_true', help='continue training')
     args = parser.parse_args()
 
-    synth = datasets.SynthText(args.train_folder, datasets.transform)
-    # icdar = datasets.ICDAR2015(args.train_folder, datasets.transform)
-    # concat_dataset = torch.utils.data.ConcatDataset((synth, icdar))  # the paper doesn't do that so me neither
+    data_set = datasets.SynthText(args.train_folder, datasets.transform)
+    # data_set = datasets.ICDAR2015(args.train_folder, datasets.transform)
 
-    dl = torch.utils.data.DataLoader(icdar, batch_size=args.batch_size, shuffle=True,
+    # SynthText and ICDAR2015 have different layouts. One will probably need to provide two different paths to train
+    # on concatination of these two data sets. But the paper doesn't concat them so me neither
+    # datai_set = torch.utils.data.ConcatDataset((synth, icdar))
+
+    dl = torch.utils.data.DataLoader(data_set, batch_size=args.batch_size, shuffle=True,
                                      sampler=None, batch_sampler=None, num_workers=args.num_workers)
     checkoint_dir = 'runs'
     epoch, model, optimizer, lr_scheduler, best_score = restore_checkpoint(checkoint_dir, args.continue_training)
