@@ -16,7 +16,7 @@
 
     The result was `Epoch 582: 100%|█████████████| 48/48 [01:05<00:00,  1.04s/it, Mean loss=0.11290]`.
 
-### Weight decay history:
+### Learning rate schedule:
 Epoch   175: reducing learning rate of group 0 to 5.0000e-04.
 
 Epoch   264: reducing learning rate of group 0 to 2.5000e-04.
